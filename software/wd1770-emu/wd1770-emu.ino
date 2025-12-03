@@ -58,6 +58,10 @@
 #define PIN_RDY         PC14  // Ready (input)
 #define PIN_MO          PC15  // Motor On (input)
 
+// Drive Select Pins (system selects which drive is active)
+#define PIN_DS0         PC0   // Drive Select 0 (Drive A:)
+#define PIN_DS1         PC1   // Drive Select 1 (Drive B:)
+
 // Optional UI pins
 #define PIN_LED         PC13  // Activity LED
 #define ROTARY_CLK      PA0   // Rotary encoder
