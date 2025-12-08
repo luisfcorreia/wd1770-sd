@@ -13,12 +13,18 @@
  * - Rotary encoder (optional, for image selection)
  * 
  * Pin-compatible with WD1770 28-pin DIP package
+ * 
+ * Required Libraries:
+ * - Adafruit SSD1306
+ * - Adafruit GFX Library
  */
 
 #include <Arduino.h>
 #include <SPI.h>
 #include <SD.h>
 #include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
 // ===================== CONFIGURATION =====================
 
@@ -67,10 +73,21 @@
 #define ROTARY_CLK      PA0   // Rotary encoder
 #define ROTARY_DT       PA1
 #define ROTARY_SW       PA2   // Rotary switch
-#define OLED_SDA        PB7   // I2C for OLED
-#define OLED_SCL        PB6
+
+// I2C pins for OLED (hardware I2C)
+// Note: STM32F411 uses PB6=SCL, PB7=SDA for I2C1
+// But these conflict with data bus, so use software I2C or I2C2
+#define OLED_SDA        PB11  // Changed to avoid conflicts
+#define OLED_SCL        PB10  // Changed to avoid conflicts
+#define SCREEN_WIDTH    128
+#define SCREEN_HEIGHT   64
+#define OLED_RESET      -1    // Reset pin not used
+#define SCREEN_ADDRESS  0x3C  // Common I2C address for SSD1306
 
 // ===================== CONSTANTS =====================
+
+// Maximum number of drives
+#define MAX_DRIVES      2
 
 // Register addresses
 #define REG_STATUS_CMD  0
@@ -176,13 +193,19 @@ typedef struct {
 // ===================== GLOBAL VARIABLES =====================
 
 FDCState fdc;
-DiskImage disk;
-File imageFile;
+DiskImage disks[MAX_DRIVES];      // Two separate disk images (Drive A: and B:)
+File imageFiles[MAX_DRIVES];      // Two open file handles
+uint8_t activeDrive = 0;          // Currently selected drive (0 or 1)
 uint8_t dataPins[] = {PIN_D0, PIN_D1, PIN_D2, PIN_D3, PIN_D4, PIN_D5, PIN_D6, PIN_D7};
 
 String diskImages[100];
-int currentImageIndex = 0;
+int currentImageIndex[MAX_DRIVES] = {0, 0};  // Selected image for each drive
 int totalImages = 0;
+bool oledPresent = false;
+uint8_t uiSelectedDrive = 0;  // Drive being configured via UI (independent from activeDrive)
+
+// OLED Display
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 // ===================== SETUP =====================
 
@@ -194,9 +217,36 @@ void setup() {
     // Initialize pins
     initPins();
     
+    // Initialize I2C for OLED
+    Wire.begin();
+    Wire.setClock(400000);  // 400kHz I2C
+    
+    // Initialize OLED display
+    if (display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+        oledPresent = true;
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setTextColor(SSD1306_WHITE);
+        display.setCursor(0, 0);
+        display.println("WD1770 Emulator");
+        display.println("Initializing...");
+        display.display();
+        Serial.println("OLED display initialized");
+    } else {
+        Serial.println("OLED display not found");
+        oledPresent = false;
+    }
+    
     // Initialize SD card
     if (!initSDCard()) {
         Serial.println("SD Card initialization failed!");
+        if (oledPresent) {
+            display.clearDisplay();
+            display.setCursor(0, 0);
+            display.println("ERROR:");
+            display.println("SD Card Failed!");
+            display.display();
+        }
         while(1) {
             digitalWrite(PIN_LED, !digitalRead(PIN_LED));
             delay(100);
@@ -206,13 +256,19 @@ void setup() {
     // Scan for disk images
     scanDiskImages();
     
-    // Load first image
+    // Load first images into both drives
     if (totalImages > 0) {
-        loadDiskImage(0);
+        loadDiskImage(0, 0);  // Drive A: first image
+        if (totalImages > 1) {
+            loadDiskImage(1, 1);  // Drive B: second image (if available)
+        }
     }
     
     // Initialize FDC state
     initFDC();
+    
+    // Update display
+    updateDisplay();
     
     Serial.println("Ready!");
 }
@@ -220,6 +276,9 @@ void setup() {
 // ===================== MAIN LOOP =====================
 
 void loop() {
+    // Check drive select lines to determine active drive
+    checkDriveSelect();
+    
     // Check for chip select
     if (digitalRead(PIN_CS) == LOW) {
         uint8_t addr = (digitalRead(PIN_A1) << 1) | digitalRead(PIN_A0);
@@ -247,6 +306,13 @@ void loop() {
     
     // Check for image selection (rotary encoder)
     checkImageSelection();
+    
+    // Update display periodically
+    static unsigned long lastDisplayUpdate = 0;
+    if (millis() - lastDisplayUpdate > 100) {  // Update every 100ms
+        updateDisplay();
+        lastDisplayUpdate = millis();
+    }
 }
 
 // ===================== PIN INITIALIZATION =====================
@@ -266,6 +332,10 @@ void initPins() {
     pinMode(PIN_DDEN, INPUT);
     pinMode(PIN_MO, INPUT);
     pinMode(PIN_WPT, INPUT_PULLUP);
+    
+    // Drive Select inputs
+    pinMode(PIN_DS0, INPUT_PULLUP);
+    pinMode(PIN_DS1, INPUT_PULLUP);
     
     // Control outputs
     pinMode(PIN_INTRQ, OUTPUT);
@@ -344,66 +414,76 @@ void scanDiskImages() {
     Serial.println(" disk images");
 }
 
-bool loadDiskImage(int index) {
+bool loadDiskImage(int driveNum, int index) {
+    if (driveNum < 0 || driveNum >= MAX_DRIVES) return false;
     if (index < 0 || index >= totalImages) return false;
     
     // Close previous image
-    if (imageFile) {
-        imageFile.close();
+    if (imageFiles[driveNum]) {
+        imageFiles[driveNum].close();
     }
     
     // Open new image
     String path = "/" + diskImages[index];
-    imageFile = SD.open(path.c_str(), FILE_READ);
+    imageFiles[driveNum] = SD.open(path.c_str(), FILE_READ);
     
-    if (!imageFile) {
+    if (!imageFiles[driveNum]) {
         Serial.print("Failed to open: ");
         Serial.println(path);
         return false;
     }
     
     // Analyze image format
-    currentImageIndex = index;
-    strncpy(disk.filename, diskImages[index].c_str(), 63);
-    disk.size = imageFile.size();
+    currentImageIndex[driveNum] = index;
+    strncpy(disks[driveNum].filename, diskImages[index].c_str(), 63);
+    disks[driveNum].size = imageFiles[driveNum].size();
     
     // Detect format based on size
-    if (disk.size == 737280) {  // 720KB - DD 3.5"
-        disk.tracks = 80;
-        disk.sectorsPerTrack = 9;
-        disk.sectorSize = 512;
-        disk.doubleDensity = true;
+    if (disks[driveNum].size == 737280) {  // 720KB - DD 3.5"
+        disks[driveNum].tracks = 80;
+        disks[driveNum].sectorsPerTrack = 9;
+        disks[driveNum].sectorSize = 512;
+        disks[driveNum].doubleDensity = true;
     }
-    else if (disk.size == 368640) {  // 360KB - DD 5.25"
-        disk.tracks = 40;
-        disk.sectorsPerTrack = 9;
-        disk.sectorSize = 512;
-        disk.doubleDensity = true;
+    else if (disks[driveNum].size == 368640) {  // 360KB - DD 5.25"
+        disks[driveNum].tracks = 40;
+        disks[driveNum].sectorsPerTrack = 9;
+        disks[driveNum].sectorSize = 512;
+        disks[driveNum].doubleDensity = true;
     }
-    else if (disk.size == 163840) {  // 160KB - SD
-        disk.tracks = 40;
-        disk.sectorsPerTrack = 8;
-        disk.sectorSize = 256;
-        disk.doubleDensity = false;
+    else if (disks[driveNum].size == 163840) {  // 160KB - Timex FDD 3000 / Single Density
+        disks[driveNum].tracks = 40;
+        disks[driveNum].sectorsPerTrack = 16;
+        disks[driveNum].sectorSize = 256;
+        disks[driveNum].doubleDensity = false;
+    }
+    else if (disks[driveNum].size == 327680) {  // 320KB - Timex FDD 3000 both sides
+        disks[driveNum].tracks = 40;
+        disks[driveNum].sectorsPerTrack = 16;
+        disks[driveNum].sectorSize = 256;
+        disks[driveNum].doubleDensity = false;
     }
     else {
         // Default to 720KB format
-        disk.tracks = 80;
-        disk.sectorsPerTrack = 9;
-        disk.sectorSize = 512;
-        disk.doubleDensity = true;
+        disks[driveNum].tracks = 80;
+        disks[driveNum].sectorsPerTrack = 9;
+        disks[driveNum].sectorSize = 512;
+        disks[driveNum].doubleDensity = true;
     }
     
-    disk.writeProtected = false;
+    disks[driveNum].writeProtected = false;
     
-    Serial.print("Loaded: ");
-    Serial.println(disk.filename);
-    Serial.print("Tracks: ");
-    Serial.print(disk.tracks);
+    char driveLetter = 'A' + driveNum;
+    Serial.print("Drive ");
+    Serial.print(driveLetter);
+    Serial.print(": Loaded ");
+    Serial.println(disks[driveNum].filename);
+    Serial.print("  Tracks: ");
+    Serial.print(disks[driveNum].tracks);
     Serial.print(", Sectors: ");
-    Serial.print(disk.sectorsPerTrack);
+    Serial.print(disks[driveNum].sectorsPerTrack);
     Serial.print(", Size: ");
-    Serial.println(disk.sectorSize);
+    Serial.println(disks[driveNum].sectorSize);
     
     return true;
 }
@@ -432,9 +512,204 @@ void initFDC() {
     fdc.lastIndexTime = 0;
     fdc.stepRate = STEP_TIME_6MS;
     
-    fdc.writeProtect = disk.writeProtected;
+    fdc.writeProtect = false;  // Will be updated per drive
     fdc.motorOn = false;
     fdc.indexPulse = false;
+}
+
+// ===================== DRIVE SELECT =====================
+
+void checkDriveSelect() {
+    // Check which drive select line is active (active low)
+    bool ds0 = (digitalRead(PIN_DS0) == LOW);
+    bool ds1 = (digitalRead(PIN_DS1) == LOW);
+    
+    uint8_t newDrive = activeDrive;
+    
+    if (ds0 && !ds1) {
+        newDrive = 0;  // Drive A: selected
+    } 
+    else if (!ds0 && ds1) {
+        newDrive = 1;  // Drive B: selected
+    }
+    // If both or neither are active, keep current drive
+    
+    if (newDrive != activeDrive) {
+        activeDrive = newDrive;
+        // Update write protect status for newly selected drive
+        fdc.writeProtect = disks[activeDrive].writeProtected;
+        
+        Serial.print("Drive switched to: ");
+        Serial.println((char)('A' + activeDrive));
+        
+        // Update display immediately on drive change
+        updateDisplay();
+    }
+}
+
+// ===================== OLED DISPLAY =====================
+
+void updateDisplay() {
+    if (!oledPresent) return;
+    
+    display.clearDisplay();
+    
+    // Title bar
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.print("WD1770 Emulator");
+    
+    // Status indicator
+    if (fdc.busy) {
+        display.fillCircle(120, 3, 3, SSD1306_WHITE);  // Activity indicator
+    }
+    
+    // Draw separator line
+    display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
+    
+    // Drive A information
+    display.setCursor(0, 14);
+    display.setTextSize(1);
+    
+    // Show which drive is active by system (DS lines) with asterisk
+    // Show which drive is selected for UI configuration with ">"
+    if (activeDrive == 0) {
+        display.print("*");  // System is accessing this drive
+    } else {
+        display.print(" ");
+    }
+    
+    if (uiSelectedDrive == 0) {
+        display.print("> A:");  // UI is configuring this drive
+    } else {
+        display.print("  A:");
+    }
+    
+    display.setCursor(0, 24);
+    if (disks[0].filename[0] != '\0') {
+        // Show filename (truncate if too long)
+        String fname = String(disks[0].filename);
+        if (fname.length() > 21) {
+            fname = fname.substring(0, 18) + "...";
+        }
+        display.print(fname);
+    } else {
+        display.print("(empty)");
+    }
+    
+    // Drive B information
+    display.setCursor(0, 36);
+    
+    if (activeDrive == 1) {
+        display.print("*");  // System is accessing this drive
+    } else {
+        display.print(" ");
+    }
+    
+    if (uiSelectedDrive == 1) {
+        display.print("> B:");  // UI is configuring this drive
+    } else {
+        display.print("  B:");
+    }
+    
+    display.setCursor(0, 46);
+    if (disks[1].filename[0] != '\0') {
+        // Show filename (truncate if too long)
+        String fname = String(disks[1].filename);
+        if (fname.length() > 21) {
+            fname = fname.substring(0, 18) + "...";
+        }
+        display.print(fname);
+    } else {
+        display.print("(empty)");
+    }
+    
+    // Bottom status bar
+    display.drawLine(0, 56, 127, 56, SSD1306_WHITE);
+    display.setCursor(0, 58);
+    display.setTextSize(1);
+    display.print("Img:");
+    display.print(totalImages);
+    
+    // Show current track on system active drive
+    if (disks[activeDrive].filename[0] != '\0') {
+        display.setCursor(50, 58);
+        display.print("T:");
+        display.print(fdc.currentTrack);
+    }
+    
+    // Legend
+    display.setCursor(85, 58);
+    display.print("*=Act >=UI");
+    
+    display.display();
+}
+
+void showImageSelectionMenu() {
+    if (!oledPresent) return;
+    
+    display.clearDisplay();
+    
+    // Title - show which drive we're selecting for
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.print("Select for Drive ");
+    display.print((char)('A' + uiSelectedDrive));
+    display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
+    
+    // Show current selection and surrounding entries
+    int startIdx = max(0, currentImageIndex[uiSelectedDrive] - 2);
+    int endIdx = min(totalImages - 1, startIdx + 4);
+    
+    // Adjust start if we're near the end
+    if (endIdx - startIdx < 4 && startIdx > 0) {
+        startIdx = max(0, endIdx - 4);
+    }
+    
+    int y = 14;
+    for (int i = startIdx; i <= endIdx && i < totalImages; i++) {
+        display.setCursor(0, y);
+        
+        // Highlight current selection
+        if (i == currentImageIndex[uiSelectedDrive]) {
+            display.fillRect(0, y, 128, 10, SSD1306_WHITE);
+            display.setTextColor(SSD1306_BLACK);
+            display.print(">");
+        } else {
+            display.setTextColor(SSD1306_WHITE);
+            display.print(" ");
+        }
+        
+        // Show filename (truncate if needed)
+        String fname = diskImages[i];
+        if (fname.length() > 20) {
+            fname = fname.substring(0, 17) + "...";
+        }
+        display.print(fname);
+        
+        display.setTextColor(SSD1306_WHITE);  // Reset color
+        y += 10;
+    }
+    
+    // Instructions
+    display.setCursor(0, 56);
+    display.print("Turn=Sel Press=Load");
+    
+    display.display();
+}
+
+void showDriveSwitchMessage() {
+    if (!oledPresent) return;
+    
+    display.clearDisplay();
+    display.setTextSize(2);
+    display.setCursor(20, 20);
+    display.print("Drive ");
+    display.print((char)('A' + uiSelectedDrive));
+    display.setTextSize(1);
+    display.setCursor(15, 45);
+    display.print("UI Mode Selected");
+    display.display();
 }
 
 // ===================== READ/WRITE HANDLERS =====================
@@ -606,7 +881,9 @@ void cmdStep(uint8_t cmd) {
 
 // Type II Commands
 void cmdReadSector(uint8_t cmd) {
-    if (fdc.currentTrack >= disk.tracks || fdc.sector == 0 || fdc.sector > disk.sectorsPerTrack) {
+    DiskImage* currentDisk = &disks[activeDrive];
+    
+    if (fdc.currentTrack >= currentDisk->tracks || fdc.sector == 0 || fdc.sector > currentDisk->sectorsPerTrack) {
         fdc.status = ST_RNF;
         fdc.busy = false;
         fdc.intrq = true;
@@ -614,10 +891,10 @@ void cmdReadSector(uint8_t cmd) {
     }
     
     // Calculate sector position in file
-    uint32_t offset = (fdc.currentTrack * disk.sectorsPerTrack + (fdc.sector - 1)) * disk.sectorSize;
+    uint32_t offset = (fdc.currentTrack * currentDisk->sectorsPerTrack + (fdc.sector - 1)) * currentDisk->sectorSize;
     
-    imageFile.seek(offset);
-    fdc.dataLength = imageFile.read(fdc.sectorBuffer, disk.sectorSize);
+    imageFiles[activeDrive].seek(offset);
+    fdc.dataLength = imageFiles[activeDrive].read(fdc.sectorBuffer, currentDisk->sectorSize);
     
     fdc.dataIndex = 0;
     fdc.drq = true;
@@ -634,13 +911,15 @@ void completeSectorRead() {
     digitalWrite(PIN_LED, LOW);
     
     // Auto-increment for multi-sector read
-    if ((fdc.command & 0x10) && fdc.sector < disk.sectorsPerTrack) {
+    if ((fdc.command & 0x10) && fdc.sector < disks[activeDrive].sectorsPerTrack) {
         fdc.sector++;
         cmdReadSector(fdc.command);
     }
 }
 
 void cmdWriteSector(uint8_t cmd) {
+    DiskImage* currentDisk = &disks[activeDrive];
+    
     if (fdc.writeProtect) {
         fdc.status = ST_WRITE_PROTECT;
         fdc.busy = false;
@@ -648,7 +927,7 @@ void cmdWriteSector(uint8_t cmd) {
         return;
     }
     
-    if (fdc.currentTrack >= disk.tracks || fdc.sector == 0 || fdc.sector > disk.sectorsPerTrack) {
+    if (fdc.currentTrack >= currentDisk->tracks || fdc.sector == 0 || fdc.sector > currentDisk->sectorsPerTrack) {
         fdc.status = ST_RNF;
         fdc.busy = false;
         fdc.intrq = true;
@@ -656,7 +935,7 @@ void cmdWriteSector(uint8_t cmd) {
     }
     
     fdc.dataIndex = 0;
-    fdc.dataLength = disk.sectorSize;
+    fdc.dataLength = currentDisk->sectorSize;
     fdc.drq = true;
     fdc.status = ST_BUSY | ST_DRQ;
     
@@ -664,12 +943,14 @@ void cmdWriteSector(uint8_t cmd) {
 }
 
 void completeSectorWrite() {
-    // Calculate sector position
-    uint32_t offset = (fdc.currentTrack * disk.sectorsPerTrack + (fdc.sector - 1)) * disk.sectorSize;
+    DiskImage* currentDisk = &disks[activeDrive];
     
-    imageFile.seek(offset);
-    imageFile.write(fdc.sectorBuffer, disk.sectorSize);
-    imageFile.flush();
+    // Calculate sector position
+    uint32_t offset = (fdc.currentTrack * currentDisk->sectorsPerTrack + (fdc.sector - 1)) * currentDisk->sectorSize;
+    
+    imageFiles[activeDrive].seek(offset);
+    imageFiles[activeDrive].write(fdc.sectorBuffer, currentDisk->sectorSize);
+    imageFiles[activeDrive].flush();
     
     fdc.busy = false;
     fdc.intrq = true;
@@ -678,7 +959,7 @@ void completeSectorWrite() {
     digitalWrite(PIN_LED, LOW);
     
     // Auto-increment for multi-sector write
-    if ((fdc.command & 0x10) && fdc.sector < disk.sectorsPerTrack) {
+    if ((fdc.command & 0x10) && fdc.sector < currentDisk->sectorsPerTrack) {
         fdc.sector++;
         cmdWriteSector(fdc.command);
     }
@@ -689,7 +970,7 @@ void cmdReadAddress(uint8_t cmd) {
     fdc.sectorBuffer[0] = fdc.currentTrack;
     fdc.sectorBuffer[1] = 0;  // Side
     fdc.sectorBuffer[2] = 1;  // First sector
-    fdc.sectorBuffer[3] = (disk.sectorSize == 512) ? 2 : 1;  // Sector size code
+    fdc.sectorBuffer[3] = (disks[activeDrive].sectorSize == 512) ? 2 : 1;  // Sector size code
     fdc.sectorBuffer[4] = 0;  // CRC1
     fdc.sectorBuffer[5] = 0;  // CRC2
     
@@ -700,12 +981,14 @@ void cmdReadAddress(uint8_t cmd) {
 }
 
 void cmdReadTrack(uint8_t cmd) {
-    // Read entire track
-    uint32_t offset = fdc.currentTrack * disk.sectorsPerTrack * disk.sectorSize;
-    uint16_t trackSize = disk.sectorsPerTrack * disk.sectorSize;
+    DiskImage* currentDisk = &disks[activeDrive];
     
-    imageFile.seek(offset);
-    fdc.dataLength = imageFile.read(fdc.sectorBuffer, min(trackSize, 1024));
+    // Read entire track
+    uint32_t offset = fdc.currentTrack * currentDisk->sectorsPerTrack * currentDisk->sectorSize;
+    uint16_t trackSize = currentDisk->sectorsPerTrack * currentDisk->sectorSize;
+    
+    imageFiles[activeDrive].seek(offset);
+    fdc.dataLength = imageFiles[activeDrive].read(fdc.sectorBuffer, min(trackSize, 1024));
     
     fdc.dataIndex = 0;
     fdc.drq = true;
@@ -722,7 +1005,7 @@ void cmdWriteTrack(uint8_t cmd) {
     }
     
     fdc.dataIndex = 0;
-    fdc.dataLength = disk.sectorsPerTrack * disk.sectorSize;
+    fdc.dataLength = disks[activeDrive].sectorsPerTrack * disks[activeDrive].sectorSize;
     fdc.drq = true;
     fdc.status = ST_BUSY | ST_DRQ;
 }
@@ -769,32 +1052,86 @@ void processCommand() {
 void checkImageSelection() {
     static int lastCLK = HIGH;
     static unsigned long lastDebounce = 0;
+    static unsigned long buttonPressTime = 0;
+    static bool buttonPressed = false;
+    static bool inSelectionMode = false;
     
     int clk = digitalRead(ROTARY_CLK);
+    int sw = digitalRead(ROTARY_SW);
     
+    // Rotary encoder rotation - always works on uiSelectedDrive
     if (clk != lastCLK && (millis() - lastDebounce > 5)) {
         if (digitalRead(ROTARY_DT) != clk) {
-            currentImageIndex++;
-            if (currentImageIndex >= totalImages) currentImageIndex = 0;
+            // Clockwise
+            currentImageIndex[uiSelectedDrive]++;
+            if (currentImageIndex[uiSelectedDrive] >= totalImages) {
+                currentImageIndex[uiSelectedDrive] = 0;
+            }
         } else {
-            currentImageIndex--;
-            if (currentImageIndex < 0) currentImageIndex = totalImages - 1;
+            // Counter-clockwise
+            currentImageIndex[uiSelectedDrive]--;
+            if (currentImageIndex[uiSelectedDrive] < 0) {
+                currentImageIndex[uiSelectedDrive] = totalImages - 1;
+            }
         }
         
-        Serial.print("Selected: ");
-        Serial.println(diskImages[currentImageIndex]);
+        Serial.print("UI Drive ");
+        Serial.print((char)('A' + uiSelectedDrive));
+        Serial.print(" - Browsing: ");
+        Serial.println(diskImages[currentImageIndex[uiSelectedDrive]]);
+        
+        // Show selection menu when rotating
+        inSelectionMode = true;
+        showImageSelectionMenu();
+        
         lastDebounce = millis();
     }
     
     lastCLK = clk;
     
-    // Button press to load image
-    if (digitalRead(ROTARY_SW) == LOW) {
-        delay(200);  // Debounce
-        if (digitalRead(ROTARY_SW) == LOW) {
-            loadDiskImage(currentImageIndex);
-            while (digitalRead(ROTARY_SW) == LOW);
+    // Return to normal display after 3 seconds of inactivity
+    if (inSelectionMode && (millis() - lastDebounce > 3000)) {
+        inSelectionMode = false;
+        updateDisplay();
+    }
+    
+    // Button press detection
+    if (sw == LOW && !buttonPressed) {
+        buttonPressed = true;
+        buttonPressTime = millis();
+    }
+    
+    // Button released
+    if (sw == HIGH && buttonPressed) {
+        unsigned long pressDuration = millis() - buttonPressTime;
+        
+        if (pressDuration >= 1000) {
+            // LONG PRESS: Toggle UI selected drive (A <-> B)
+            uiSelectedDrive = 1 - uiSelectedDrive;
+            
+            Serial.print("UI switched to Drive ");
+            Serial.println((char)('A' + uiSelectedDrive));
+            
+            // Show drive switch message briefly
+            showDriveSwitchMessage();
+            delay(500);
+            updateDisplay();
+            
+        } else if (pressDuration >= 50) {
+            // SHORT PRESS: Load selected image into uiSelectedDrive
+            Serial.print("Loading image into Drive ");
+            Serial.print((char)('A' + uiSelectedDrive));
+            Serial.print(": ");
+            Serial.println(diskImages[currentImageIndex[uiSelectedDrive]]);
+            
+            loadDiskImage(uiSelectedDrive, currentImageIndex[uiSelectedDrive]);
+            
+            inSelectionMode = false;
+            updateDisplay();
         }
+        
+        buttonPressed = false;
+        buttonPressTime = 0;
     }
 }
 
