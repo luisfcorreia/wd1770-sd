@@ -7,9 +7,13 @@ A drop-in replacement for the Western Digital WD1770/1772 Floppy Disk Controller
 **WORK IN PROGRESS - NOT YET FUNCTIONAL**
 
 This project is in active development. Current status:
-- [ ] Basic code structure implemented
-- [ ] SD card reading functional
-- [ ] Register interface defined
+- [x] Basic code structure implemented
+- [x] SD card reading functional
+- [x] Register interface defined
+- [x] Dual drive support (A: and B:)
+- [x] OLED display integration
+- [x] Rotary encoder for image selection
+- [x] Multiple disk format support
 - [ ] CPU interface timing needs work
 - [ ] Real hardware testing pending
 - [ ] Not yet tested with actual systems
@@ -19,8 +23,10 @@ This project is in active development. Current status:
 Create a hardware module that:
 - Acts as a pin-compatible replacement for WD1770/1772 FDC chips
 - Reads standard floppy disk images (.DSK, .ST, .IMG, HFE) from SD card
+- Supports dual drive operation (A: and B:)
+- Provides easy disk image selection via OLED and rotary encoder
 - Eliminates the need for physical floppy drives
-- Supports vintage computers (Atari ST, Amiga, MSX, CPC, etc.)
+- Supports vintage computers (Atari ST, Amiga, MSX, CPC, Timex, etc.)
 - Inspired by the excellent [FlashFloppy](https://github.com/keirf/flashfloppy) project
 
 ## Hardware Requirements
@@ -29,10 +35,8 @@ Create a hardware module that:
 - **STM32F411 "Black Pill"** development board (or similar STM32F4)
 - **SD Card Module** (SPI interface)
 - **SD Card** (FAT32 formatted, up to 32GB recommended)
-
-### Optional Components
-- **0.96" OLED Display** (I2C, 128x64) - for disk image selection
-- **Rotary Encoder** with push button - for navigation
+- **0.96" OLED Display** (I2C, 128x64, SSD1306)
+- **Rotary Encoder** with push button
 - **LED** (any color) with 330Ω resistor - activity indicator
 
 ### Why STM32F411?
@@ -40,6 +44,7 @@ Create a hardware module that:
 - 100MHz clock speed (fast enough for FDC timing)
 - Sufficient RAM for sector buffering
 - Built-in SPI for SD card
+- Hardware I2C for OLED
 - Affordable (~$4-8 USD)
 
 ## Pin Mapping
@@ -64,6 +69,8 @@ Create a hardware module that:
 | TR00   | PB14      | Output | Track 0 indicator |
 | IP     | PB15      | Output | Index Pulse |
 | DDEN̅   | PB9       | Input | Double Density Enable |
+| DS0    | PC0       | Input | Drive Select 0 (Drive A:) |
+| DS1    | PC1       | Input | Drive Select 1 (Drive B:) |
 
 ### SD Card (SPI)
 | Signal | STM32 Pin | Description |
@@ -73,52 +80,128 @@ Create a hardware module that:
 | MISO   | PA6       | Master In Slave Out |
 | MOSI   | PA7       | Master Out Slave In |
 
-### Optional UI
+### User Interface
 | Component | STM32 Pin | Description |
 |-----------|-----------|-------------|
 | LED       | PC13      | Activity indicator |
 | Rotary CLK | PA0      | Encoder clock |
 | Rotary DT  | PA1      | Encoder data |
 | Rotary SW  | PA2      | Encoder button |
-| OLED SDA   | PB7      | I2C Data (optional) |
-| OLED SCL   | PB6      | I2C Clock (optional) |
+| OLED SDA   | PB11     | I2C Data |
+| OLED SCL   | PB10     | I2C Clock |
 
 ## Wiring Notes
 
 ### Critical Hardware Requirements
-1. **Pull-up resistors (10kΩ)** on: A0, A1, CS, RE, WE
+1. **Pull-up resistors (10kΩ)** on: A0, A1, CS, RE, WE, DS0, DS1
 2. **Decoupling capacitors (100nF)** on all STM32 VCC/GND pairs
 3. **Current limiting resistor (330Ω)** for LED
-4. **I2C pull-ups (4.7kΩ)** on SDA/SCL if using OLED
+4. **I2C pull-ups (4.7kΩ)** on SDA/SCL for OLED
 
 ### 5V Tolerance
 The STM32F411 has 5V tolerant inputs, so **no level shifters are required** when interfacing with 5V vintage systems. The 3.3V outputs are typically sufficient for TTL logic inputs.
 
 ## Supported Disk Image Formats
 
-| Format | Extension | Description | Status |
-|--------|-----------|-------------|--------|
-| Raw Sector | .DSK, .IMG | Plain sector dump | Supported |
-| Atari ST | .ST | Atari ST disk image | Supported |
-| HFE | .HFE | Universal flux format | Planned |
-| ADF | .ADF | Amiga disk format | Planned |
+| Format | Extension | Geometry | Size | Status |
+|--------|-----------|----------|------|--------|
+| 3.5" DD | .DSK, .IMG | 80T/9S/512B | 720KB | Supported |
+| 5.25" DD | .DSK, .IMG | 40T/9S/512B | 360KB | Supported |
+| Timex FDD 3000 | .DSK | 40T/16S/256B | 160KB | Supported |
+| Timex DS | .DSK | 40T/16S/256B (DS) | 320KB | Supported |
+| Atari ST | .ST | Various | Various | Supported |
+| HFE | .HFE | Universal flux | Various | Planned |
+| ADF | .ADF | Amiga format | Various | Planned |
 
-### Disk Image Sizes
-The emulator auto-detects common formats:
-- **720KB** (80 tracks, 9 sectors, 512 bytes) - 3.5" DD
-- **360KB** (40 tracks, 9 sectors, 512 bytes) - 5.25" DD
-- **160KB** (40 tracks, 8 sectors, 256 bytes) - Single density
+### Format Details
+- **720KB**: Standard 3.5" double-density (80 tracks, 9 sectors/track, 512 bytes/sector)
+- **360KB**: Standard 5.25" double-density (40 tracks, 9 sectors/track, 512 bytes/sector)
+- **160KB**: Timex FDD 3000 single-sided (40 tracks, 16 sectors/track, 256 bytes/sector)
+- **320KB**: Timex FDD 3000 double-sided (40 tracks, 16 sectors/track, 256 bytes/sector)
+
+## User Interface
+
+### OLED Display
+
+**Main Screen:**
+```
+┌─────────────────────────┐
+│ WD1770 Emulator      ● │  <- Activity indicator
+├─────────────────────────┤
+│*> A: game1.st          │  <- Drive indicators
+│   B: system.st         │
+│                         │
+├─────────────────────────┤
+│ Img:42  T:12  *=Act >=UI│  <- Status bar
+└─────────────────────────┘
+```
+
+**Display Indicators:**
+- `*` = System is currently accessing this drive (via DS0/DS1)
+- `>` = UI is configuring this drive (rotary encoder controls)
+- `●` = Activity indicator (blinks during disk access)
+
+**Image Selection Menu:**
+```
+┌─────────────────────────┐
+│ Select for Drive A      │
+├─────────────────────────┤
+│  game1.st              │
+│  game2.st              │
+│ >game3.st              │  <- Current selection
+│  system.st             │
+│  utility.st            │
+├─────────────────────────┤
+│ Turn=Sel Press=Load    │
+└─────────────────────────┘
+```
+
+### Rotary Encoder Controls
+
+- **Rotate**: Browse disk images for currently selected UI drive
+- **Short Press (<1 sec)**: Load selected image into UI drive
+- **Long Press (>1 sec)**: Toggle between Drive A and Drive B for UI configuration
+
+### Independent Dual Drive Operation
+
+The emulator maintains two separate contexts:
+
+1. **System Active Drive** (DS0/DS1 pins)
+   - Controlled by the host computer
+   - Shows which drive the system is currently accessing
+   - Indicated by `*` on display
+
+2. **UI Selected Drive** (rotary encoder)
+   - Controlled by you via the rotary encoder
+   - Determines which drive's image you're configuring
+   - Indicated by `>` on display
+   - Can be different from system active drive
+
+**Example Usage:**
+1. System is reading from Drive A (DS0 active) - shows `*> A:`
+2. Long-press button to switch UI to Drive B - shows `*  A:` and `  > B:`
+3. Rotate encoder to browse images for Drive B (independent of system)
+4. Short-press to load new image into Drive B
+5. System can still be accessing Drive A throughout this process
 
 ## Installation
 
-### 1. Prepare the Hardware
+### 1. Required Arduino Libraries
+
+Install via Arduino IDE Library Manager:
+- **Adafruit SSD1306** (for OLED display)
+- **Adafruit GFX Library** (graphics library)
+
+### 2. Prepare the Hardware
 - Solder pin headers to STM32F411 Black Pill
 - Connect SD card module via SPI
+- Connect OLED display via I2C
+- Connect rotary encoder
 - Add pull-up resistors to control signals
 - Add decoupling capacitors
 - Wire to target system according to pin mapping
 
-### 2. Prepare the SD Card
+### 3. Prepare the SD Card
 ```bash
 # Format as FAT32
 # On Linux/Mac:
@@ -133,10 +216,10 @@ Copy your disk images to the root directory:
 ├── game1.st
 ├── game2.dsk
 ├── system.img
-└── utility.st
+└── utility.dsk
 ```
 
-### 3. Flash the Firmware
+### 4. Flash the Firmware
 
 #### Using Arduino IDE:
 1. Install [Arduino IDE](https://www.arduino.cc/en/software)
@@ -155,9 +238,10 @@ Copy your disk images to the root directory:
 pio run -t upload
 ```
 
-### 4. Connect to Target System
+### 5. Connect to Target System
 - Remove original WD1770 chip (carefully!)
 - Insert into socket or use ribbon cable adapter
+- Connect DS0 and DS1 lines for dual drive support
 - Power on and test
 
 ## Testing
@@ -169,19 +253,30 @@ pio run -t upload
 ```
 WD1770 SD Card Emulator
 Based on FlashFloppy concept
+OLED display initialized
 SD Card initialized
 Found: game1.st
 Found: game2.dsk
 Found 2 disk images
-Loaded: game1.st
+Drive A: Loaded game1.st
+  Tracks: 40, Sectors: 9, Size: 512
+Drive B: Loaded game2.dsk
+  Tracks: 80, Sectors: 9, Size: 512
 Ready!
 ```
+
+### OLED Display Test
+- Display should show both drives and loaded images
+- Rotate encoder to browse images
+- Long-press to switch between Drive A and Drive B UI mode
+- Short-press to load selected image
 
 ### Register Access Test
 Monitor serial output when the host system accesses registers. You should see:
 ```
 Command: 0x00  (RESTORE)
 RESTORE complete
+Drive switched to: A
 Command: 0x80  (READ SECTOR)
 READ SECTOR T:0 S:1
 ```
@@ -193,6 +288,7 @@ READ SECTOR T:0 S:1
 3. **Write operations untested** - May corrupt disk images
 4. **No configuration system** - Can't change settings without reflashing
 5. **Index pulse timing** - May need adjustment per system
+6. **I2C pin conflict** - OLED uses PB10/PB11 which conflicts with some data bus layouts
 
 ## TODO / Roadmap
 
@@ -200,13 +296,12 @@ READ SECTOR T:0 S:1
 - [ ] Add proper FDC timing delays
 - [ ] HFE format parser
 - [ ] Configuration file support (FF.CFG compatible)
-- [ ] OLED display integration
-- [ ] Multi-disk image selection via rotary encoder
-- [ ] Write protection support
+- [ ] Write protection support via physical switch
 - [ ] PCB design (DIP-28 form factor)
-- [ ] Test with real hardware (Atari ST, Amiga, MSX)
+- [ ] Test with real hardware (Atari ST, Amiga, MSX, Timex)
 - [ ] Performance optimization
-- [ ] Documentation improvements
+- [ ] Support for more exotic formats
+- [ ] Auto-detection of disk formats beyond size-based detection
 
 ## References
 
@@ -223,6 +318,10 @@ READ SECTOR T:0 S:1
 - [STM32duino Documentation](https://github.com/stm32duino/wiki/wiki)
 - [STM32F411 Reference Manual](https://www.st.com/resource/en/reference_manual/dm00119316.pdf)
 
+### Timex FDD 3000
+- Timex Computer 2068/3000 documentation
+- 3" Hitachi HFD305S drive specifications
+
 ## Contributing
 
 Contributions are welcome! This is a learning project, so feel free to:
@@ -238,6 +337,7 @@ Contributions are welcome! This is a learning project, so feel free to:
 - **PCB design** for professional board
 - **Documentation** and tutorials
 - **Format support** (HFE, ADF, etc.)
+- **Timex FDD 3000** real hardware testing
 
 ## License
 
@@ -248,6 +348,7 @@ This project is licensed under the MIT License - see LICENSE file for details.
 - **Keir Fraser** - for FlashFloppy, the main inspiration
 - **Western Digital** - for the WD1770 chip that started it all
 - **STM32duino community** - for excellent Arduino support
+- **Adafruit** - for the SSD1306 and GFX libraries
 - The vintage computing community for keeping these machines alive
 
 ## Contact
