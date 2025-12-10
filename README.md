@@ -64,13 +64,6 @@ Create a hardware module that:
 |--------|-----------|-----------|-------------|
 | INTRQ  | PA15      | Output | Interrupt Request |
 | DRQ    | PB8       | Output | Data Request |
-| STEP   | PB12      | Output | Step pulse |
-| DIRC   | PB13      | Output | Direction (1=in, 0=out) |
-| TR00   | PB14      | Output | Track 0 indicator |
-| IP     | PB15      | Output | Index Pulse |
-| DDEN̅   | PB9       | Input | Double Density Enable |
-| DS0    | PC0       | Input | Drive Select 0 (Drive A:) |
-| DS1    | PC1       | Input | Drive Select 1 (Drive B:) |
 
 ### SD Card (SPI)
 | Signal | STM32 Pin | Description |
@@ -93,7 +86,7 @@ Create a hardware module that:
 ## Wiring Notes
 
 ### Critical Hardware Requirements
-1. **Pull-up resistors (10kΩ)** on: A0, A1, CS, RE, WE, DS0, DS1
+1. **Pull-up resistors (10kΩ)** on: A0, A1, CS, RE, WE, DS0, DS1, DDEN
 2. **Decoupling capacitors (100nF)** on all STM32 VCC/GND pairs
 3. **Current limiting resistor (330Ω)** for LED
 4. **I2C pull-ups (4.7kΩ)** on SDA/SCL for OLED
