@@ -95,7 +95,7 @@ Before claiming code is ready:
 - Drive switching is UI-only (no hardware select)
 
 ## When Starting New Conversation
-1. Check if code changes were already uploaded to GitHub
+1. Always check out a fresh new copy from the repo
 2. Don't assume old artifacts are current
 3. Always work from latest code user provides
 4. Verify pin assignments haven't drifted
