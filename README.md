@@ -14,6 +14,7 @@ This project is in active development. Current status:
 - [x] OLED display integration
 - [x] Rotary encoder for image selection
 - [x] Multiple disk format support
+- [x] Code compiles successfully
 - [ ] CPU interface timing needs work
 - [ ] Real hardware testing pending
 - [ ] Not yet tested with actual systems
@@ -52,18 +53,19 @@ Create a hardware module that:
 ### WD1770 CPU Interface
 | Signal | STM32 Pin | Direction | Description |
 |--------|-----------|-----------|-------------|
-| D0-D7  | PB0-PB7, PB10 | Bidirectional | 8-bit data bus |
+| D0-D7  | PB0-PB7 | Bidirectional | 8-bit data bus |
 | A0     | PA8       | Input | Address bit 0 |
 | A1     | PA9       | Input | Address bit 1 |
 | CS̅     | PA10      | Input | Chip Select (active low) |
 | R̅E̅     | PA11      | Input | Read Enable (active low) |
 | W̅E̅     | PA12      | Input | Write Enable (active low) |
 
-### WD1770 Floppy Interface
+### WD1770 Control Interface
 | Signal | STM32 Pin | Direction | Description |
 |--------|-----------|-----------|-------------|
 | INTRQ  | PA15      | Output | Interrupt Request |
 | DRQ    | PB8       | Output | Data Request |
+| DDEN̅   | PB9       | Input | Double Density Enable |
 
 ### SD Card (SPI)
 | Signal | STM32 Pin | Description |
@@ -86,7 +88,7 @@ Create a hardware module that:
 ## Wiring Notes
 
 ### Critical Hardware Requirements
-1. **Pull-up resistors (10kΩ)** on: A0, A1, CS, RE, WE, DS0, DS1, DDEN
+1. **Pull-up resistors (10kΩ)** on: A0, A1, CS, RE, WE, DDEN
 2. **Decoupling capacitors (100nF)** on all STM32 VCC/GND pairs
 3. **Current limiting resistor (330Ω)** for LED
 4. **I2C pull-ups (4.7kΩ)** on SDA/SCL for OLED
@@ -130,8 +132,8 @@ The STM32F411 has 5V tolerant inputs, so **no level shifters are required** when
 ```
 
 **Display Indicators:**
-- `*` = System is currently accessing this drive (via DS0/DS1)
-- `>` = UI is configuring this drive (rotary encoder controls)
+- `*` = Active drive (currently responding to FDC commands)
+- `>` = UI selected drive (rotary encoder controls this one)
 - `●` = Activity indicator (blinks during disk access)
 
 **Image Selection Menu:**
@@ -155,27 +157,21 @@ The STM32F411 has 5V tolerant inputs, so **no level shifters are required** when
 - **Short Press (<1 sec)**: Load selected image into UI drive
 - **Long Press (>1 sec)**: Toggle between Drive A and Drive B for UI configuration
 
-### Independent Dual Drive Operation
+### Dual Drive Operation
 
-The emulator maintains two separate contexts:
+The emulator provides two virtual drives (A: and B:) from a single WD1770 chip:
 
-1. **System Active Drive** (DS0/DS1 pins)
-   - Controlled by the host computer
-   - Shows which drive the system is currently accessing
-   - Indicated by `*` on display
+- **Active Drive**: Which virtual drive is currently responding to FDC commands (indicated by `*`)
+- **UI Selected Drive**: Which drive you're configuring via the rotary encoder (indicated by `>`)
 
-2. **UI Selected Drive** (rotary encoder)
-   - Controlled by you via the rotary encoder
-   - Determines which drive's image you're configuring
-   - Indicated by `>` on display
-   - Can be different from system active drive
+These are independent - you can configure Drive B while Drive A is being accessed by the system.
 
 **Example Usage:**
-1. System is reading from Drive A (DS0 active) - shows `*> A:`
-2. Long-press button to switch UI to Drive B - shows `*  A:` and `  > B:`
-3. Rotate encoder to browse images for Drive B (independent of system)
+1. System boots and accesses Drive A
+2. Long-press button to switch UI to Drive B
+3. Rotate encoder to browse images for Drive B
 4. Short-press to load new image into Drive B
-5. System can still be accessing Drive A throughout this process
+5. System can switch between drives as needed
 
 ## Installation
 
@@ -234,7 +230,6 @@ pio run -t upload
 ### 5. Connect to Target System
 - Remove original WD1770 chip (carefully!)
 - Insert into socket or use ribbon cable adapter
-- Connect DS0 and DS1 lines for dual drive support
 - Power on and test
 
 ## Testing
@@ -252,9 +247,7 @@ Found: game1.st
 Found: game2.dsk
 Found 2 disk images
 Drive A: Loaded game1.st
-  Tracks: 40, Sectors: 9, Size: 512
 Drive B: Loaded game2.dsk
-  Tracks: 80, Sectors: 9, Size: 512
 Ready!
 ```
 
@@ -269,7 +262,6 @@ Monitor serial output when the host system accesses registers. You should see:
 ```
 Command: 0x00  (RESTORE)
 RESTORE complete
-Drive switched to: A
 Command: 0x80  (READ SECTOR)
 READ SECTOR T:0 S:1
 ```
@@ -280,8 +272,7 @@ READ SECTOR T:0 S:1
 2. **No HFE support** - Only raw sector images currently work
 3. **Write operations untested** - May corrupt disk images
 4. **No configuration system** - Can't change settings without reflashing
-5. **Index pulse timing** - May need adjustment per system
-6. **I2C pin conflict** - OLED uses PB10/PB11 which conflicts with some data bus layouts
+5. **Drive switching** - No hardware drive select, all switching done via UI
 
 ## TODO / Roadmap
 
@@ -295,6 +286,7 @@ READ SECTOR T:0 S:1
 - [ ] Performance optimization
 - [ ] Support for more exotic formats
 - [ ] Auto-detection of disk formats beyond size-based detection
+- [ ] Hardware drive select implementation (optional)
 
 ## References
 
@@ -354,3 +346,5 @@ This project is licensed under the MIT License - see LICENSE file for details.
 **Disclaimer**: This project involves working with vintage computer hardware. Always take proper ESD precautions and backup your data. The authors are not responsible for any damage to your equipment.
 
 **Note**: This is an educational project. While inspired by commercial products like FlashFloppy, it is built from scratch for learning purposes.
+
+**Disclaimer Zwei**: as of the date of publication, everything in this file and Arduino code was generated by claude.ai, free plan
