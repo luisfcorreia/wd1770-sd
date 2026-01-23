@@ -1,20 +1,20 @@
-# ============================================================================
-# XC9572XL-VQ64 or TQ44 User Constraints File (UCF)
+# P22 = VCC (fixed)
+NET "nRD"   LOC = "P23" | IOSTANDARD = TTL;
+NET "nWR"   LOC = "P24" | IOSTANDARD = TTL;
+NET "nM1"   LOC = "P25" | IOSTANDARD = TTL;# ============================================================================
+# XC9572XL-VQ64 User Constraints File (UCF)
 # ZX Spectrum + Timex FDD Interface with Clock Generation
-# MINIMAL ADDRESS SET - Saves 8 pins for compact routing
+# ACTUAL ADDRESS SET FROM ORIGINAL GAL CHIPS
 # ============================================================================
 #
 # Pin assignment strategy for VQ64:
-#   - North side (P1-P16):   Clock + ZX lower address bits + Control
+#   - North side (P1-P16):   Clock + ZX address bits + Control
 #   - East side (P17-P32):   ZX Data bus
 #   - South side (P33-P48):  FDD Data bus + Control
-#   - West side (P49-P64):   Clock outputs, Chip selects, upper address bits
+#   - West side (P49-P64):   Clock outputs, Chip selects
 #
-# Address lines used: A0, A1, A2, A3, A5, A13, A14, A15 (8 pins)
-# Address lines NOT connected: A4, A6, A7, A8, A9, A10, A11, A12 (saves 8 pins)
-#
-# This creates more address echoes but is acceptable for retro systems
-# and allows fitting into 44-pin package!
+# Address lines used: A2-A15 (14 pins) - matching original GAL chips
+# Address lines NOT connected: A0, A1 (not used in original GAL designs)
 #
 # JTAG pins are automatically reserved:
 #   P12 = TCK
@@ -26,9 +26,9 @@
 #   P22, P43, P64 = VCC
 #   P11, P32, P53 = GND
 #
-# Total I/O used: 34 pins
-# VQ64: 18 spare pins available
-# TQ44: 2 spare pins available (tight but fits!)
+# Total I/O used: 40 pins
+# VQ64: 12 spare pins available
+# TQ44: Does not fit (need 40, have 36)
 #
 # ============================================================================
 
@@ -39,99 +39,98 @@
 NET "CLK_16MHZ" LOC = "P1" | IOSTANDARD = LVCMOS33;
 
 # ============================================================================
-# ZX Spectrum Address Bus (MINIMAL SET - 8 pins)
-# A4, A6-A12 not connected to save pins
+# ZX Spectrum Address Bus (14 pins - actual GAL chip connections)
+# A0, A1 not connected (not used in original GAL designs)
 # ============================================================================
 
-# Lower address bits (for I/O port decoding and page-in trigger)
-NET "A0"  LOC = "P2"  | IOSTANDARD = TTL;
-NET "A1"  LOC = "P3"  | IOSTANDARD = TTL;
-NET "A2"  LOC = "P4"  | IOSTANDARD = TTL;
-NET "A3"  LOC = "P5"  | IOSTANDARD = TTL;
-NET "A5"  LOC = "P6"  | IOSTANDARD = TTL;
+NET "A2"  LOC = "P2"  | IOSTANDARD = TTL;
+NET "A3"  LOC = "P3"  | IOSTANDARD = TTL;
+NET "A4"  LOC = "P4"  | IOSTANDARD = TTL;
+NET "A5"  LOC = "P5"  | IOSTANDARD = TTL;
+NET "A6"  LOC = "P6"  | IOSTANDARD = TTL;
+NET "A7"  LOC = "P7"  | IOSTANDARD = TTL;
+NET "A8"  LOC = "P8"  | IOSTANDARD = TTL;
+NET "A9"  LOC = "P9"  | IOSTANDARD = TTL;
+NET "A10" LOC = "P10" | IOSTANDARD = TTL;
+# P11 = GND (fixed)
+# P12 = TCK (JTAG)
+# P13 = TMS (JTAG)
+# P14 = TDI (JTAG)
+NET "A11" LOC = "P15" | IOSTANDARD = TTL;
+NET "A12" LOC = "P16" | IOSTANDARD = TTL;
+NET "A13" LOC = "P17" | IOSTANDARD = TTL;
+NET "A14" LOC = "P18" | IOSTANDARD = TTL;
+NET "A15" LOC = "P19" | IOSTANDARD = TTL;
 
-# Upper address bits (for ROM/RAM chip select)
-NET "A13" LOC = "P7"  | IOSTANDARD = TTL;
-NET "A14" LOC = "P8"  | IOSTANDARD = TTL;
-NET "A15" LOC = "P9"  | IOSTANDARD = TTL;
-
-# Address lines NOT connected (leave unconnected on PCB):
-# A4, A6, A7, A8, A9, A10, A11, A12
+# Address lines NOT connected (not used by original GAL chips):
+# A0, A1
 
 # ============================================================================
 # ZX Spectrum Control Signals (5 pins)
 # ============================================================================
 
-NET "nIORQ" LOC = "P10" | IOSTANDARD = TTL;
-# P11 = GND (fixed)
-# P12 = TCK (JTAG)
-# P13 = TMS (JTAG)
-# P14 = TDI (JTAG)
-NET "nMREQ" LOC = "P15" | IOSTANDARD = TTL;
-NET "nRD"   LOC = "P16" | IOSTANDARD = TTL;
-NET "nWR"   LOC = "P17" | IOSTANDARD = TTL;
-NET "nM1"   LOC = "P18" | IOSTANDARD = TTL;
+NET "nIORQ" LOC = "P20" | IOSTANDARD = TTL;
+NET "nMREQ" LOC = "P21" | IOSTANDARD = TTL;
 
 # ============================================================================
 # ZX Spectrum Data Bus (6 pins used: D0, D1, D4, D5, D6, D7)
 # Bidirectional signals
 # ============================================================================
 
-NET "D0"    LOC = "P19" | IOSTANDARD = TTL;
-NET "D1"    LOC = "P20" | IOSTANDARD = TTL;
-NET "D4"    LOC = "P21" | IOSTANDARD = TTL;
-# P22 = VCC (fixed)
-NET "D5"    LOC = "P23" | IOSTANDARD = TTL;
-NET "D6"    LOC = "P24" | IOSTANDARD = TTL;
-NET "D7"    LOC = "P25" | IOSTANDARD = TTL;
+NET "D0"    LOC = "P26" | IOSTANDARD = TTL;
+NET "D1"    LOC = "P27" | IOSTANDARD = TTL;
+NET "D4"    LOC = "P28" | IOSTANDARD = TTL;
+NET "D5"    LOC = "P29" | IOSTANDARD = TTL;
+NET "D6"    LOC = "P30" | IOSTANDARD = TTL;
+NET "D7"    LOC = "P31" | IOSTANDARD = TTL;
 
 # ============================================================================
 # FDD Z80 Data Bus (6 pins used: D0, D1, D4, D5, D6, D7)
 # Bidirectional signals
 # ============================================================================
 
-NET "FDD_D0" LOC = "P26" | IOSTANDARD = TTL;
-NET "FDD_D1" LOC = "P27" | IOSTANDARD = TTL;
-NET "FDD_D4" LOC = "P28" | IOSTANDARD = TTL;
-NET "FDD_D5" LOC = "P29" | IOSTANDARD = TTL;
-NET "FDD_D6" LOC = "P30" | IOSTANDARD = TTL;
-NET "FDD_D7" LOC = "P31" | IOSTANDARD = TTL;
+# P32 = GND (fixed)
+NET "FDD_D0" LOC = "P33" | IOSTANDARD = TTL;
+NET "FDD_D1" LOC = "P34" | IOSTANDARD = TTL;
+NET "FDD_D4" LOC = "P35" | IOSTANDARD = TTL;
+NET "FDD_D5" LOC = "P36" | IOSTANDARD = TTL;
+NET "FDD_D6" LOC = "P37" | IOSTANDARD = TTL;
+NET "FDD_D7" LOC = "P38" | IOSTANDARD = TTL;
 
 # ============================================================================
 # FDD Control Signals (2 pins)
 # ============================================================================
 
-# P32 = GND (fixed)
-NET "nTIIN"  LOC = "P33" | IOSTANDARD = TTL;
-NET "nTIOUT" LOC = "P34" | IOSTANDARD = TTL;
+NET "nTIIN"  LOC = "P39" | IOSTANDARD = TTL;
+NET "nTIOUT" LOC = "P40" | IOSTANDARD = TTL;
 
 # ============================================================================
 # WD1770 FDC Signal (1 pin)
 # ============================================================================
 
-NET "WD1770_DRQ" LOC = "P35" | IOSTANDARD = TTL;
+NET "WD1770_DRQ" LOC = "P41" | IOSTANDARD = TTL;
 
 # ============================================================================
 # Clock Outputs (2 pins)
 # ============================================================================
 
-NET "CLK_8MHZ" LOC = "P36" | IOSTANDARD = LVCMOS33 | SLEW = FAST;
-NET "CLK_4MHZ" LOC = "P37" | IOSTANDARD = LVCMOS33 | SLEW = FAST;
+# P42 = TDO (JTAG)
+# P43 = VCC (fixed)
+NET "CLK_8MHZ" LOC = "P44" | IOSTANDARD = LVCMOS33 | SLEW = FAST;
+NET "CLK_4MHZ" LOC = "P45" | IOSTANDARD = LVCMOS33 | SLEW = FAST;
 
 # ============================================================================
 # Chip Select Outputs (3 pins)
 # ============================================================================
 
-NET "nZX_ROMCS" LOC = "P38" | IOSTANDARD = TTL;
-NET "nROM_CS"   LOC = "P39" | IOSTANDARD = TTL;
-NET "nRAM_CS"   LOC = "P40" | IOSTANDARD = TTL;
+NET "nZX_ROMCS" LOC = "P46" | IOSTANDARD = TTL;
+NET "nROM_CS"   LOC = "P47" | IOSTANDARD = TTL;
+NET "nRAM_CS"   LOC = "P48" | IOSTANDARD = TTL;
 
 # ============================================================================
 # Spare Pins Available for Future Expansion
 # ============================================================================
-# P41, P44-P52, P54-P63 (18 spare I/O pins on VQ64)
-# P42 = TDO (JTAG)
-# P43 = VCC (fixed)
+# P49-P52, P54-P63 (12 spare I/O pins on VQ64)
 # P53 = GND (fixed)
 # P64 = VCC (fixed)
 
@@ -148,53 +147,48 @@ TIMESPEC "TS_CLK_16MHZ" = PERIOD "CLK_16MHZ" 62.5 ns HIGH 50%;
 # ============================================================================
 #
 # ZX Spectrum Bus:
-#   - Address: P2-P9 (8 pins - minimal set)
-#     * Connected: A0, A1, A2, A3, A5, A13, A14, A15
-#     * NOT connected: A4, A6, A7, A8, A9, A10, A11, A12
-#   - Control: P10, P15-P18 (5 pins)
-#   - Data:    P19-P21, P23-P25 (6 pins)
+#   - Address: P2-P10, P15-P19 (14 pins - actual from GAL chips)
+#     * Connected: A2-A15
+#     * NOT connected: A0, A1 (not used in original GAL designs)
+#   - Control: P20-P21, P23-P25 (5 pins)
+#   - Data:    P26-P31 (6 pins)
 #   
 # FDD System:
-#   - Data:    P26-P31 (6 pins)
-#   - Control: P33-P34 (2 pins)
-#   - WD1770:  P35 (1 pin)
+#   - Data:    P33-P38 (6 pins)
+#   - Control: P39-P40 (2 pins)
+#   - WD1770:  P41 (1 pin)
 #
 # Clocks:
 #   - Input:   P1 (16MHz)
-#   - Outputs: P36 (8MHz), P37 (4MHz)
+#   - Outputs: P44 (8MHz), P45 (4MHz)
 #
 # Chip Selects:
-#   - P38, P39, P40 (3 pins)
+#   - P46, P47, P48 (3 pins)
 #
-# Total used: 34 I/O pins
-# Spare pins: 18 pins (VQ64) or 2 pins (TQ44)
+# Total used: 40 I/O pins
+# Spare pins: 12 pins (VQ64)
 #
 # ============================================================================
 #
-# CONSEQUENCES OF MINIMAL ADDRESS SET:
-# =====================================
+# CONSEQUENCES OF MISSING A0, A1:
+# ================================
 #
-# 1. Page-in trigger:
-#    - Original: activates only at 0x0000, 0x0008
-#    - Simplified: activates at more addresses (A4,A6-A12 ignored)
-#    - Impact: May page in unexpectedly if code accesses certain addresses
+# 1. Page-in trigger (gal23_o13):
+#    - Original: checks A0, A1, A4-A8, A11-A12
+#    - Without A0, A1: will trigger on addresses 0x0000, 0x0001, 0x0002, 0x0003
+#      and 0x0008, 0x0009, 0x000A, 0x000B (4x more addresses)
 #
-# 2. Page-out trigger:
-#    - Original: activates only around 0x604
-#    - Simplified: activates at more addresses (A9-A10 ignored)
-#    - Impact: May page out unexpectedly
+# 2. I/O port decoding (gal23_o12, gal23_o19):
+#    - Original: port address requires A0=1, A1=1
+#    - Without A0, A1: will respond to 4 I/O port addresses instead of 1
+#      (ports 0x2C, 0x2D, 0x2E, 0x2F instead of just 0x2F)
 #
-# 3. ROM/RAM echoes:
-#    - ROM echoes every 4KB throughout 0x0000-0x1FFF
-#    - RAM echoes every 2KB throughout 0x2000-0x3FFF
-#    - This is typical and acceptable for retro systems
+# 3. ROM/RAM operation:
+#    - Not affected - A0, A1 connect directly to ROM/RAM chips
 #
-# 4. I/O port:
-#    - Missing A4 check, so port responds to more addresses
-#    - Software should still work if it uses intended addresses
-#
-# RECOMMENDATION: Test thoroughly with intended ROM/software to ensure
-# the simplified address decoding doesn't cause issues with your specific
-# use case. The ROM bootloader should handle any quirks.
+# RECOMMENDATION: If the ROM software always uses the correct addresses
+# (0x0000 or 0x0008 for page-in, and 0x2F for I/O port), the missing
+# address decode will not cause issues. The extra aliases will just be
+# ignored.
 #
 # ============================================================================
