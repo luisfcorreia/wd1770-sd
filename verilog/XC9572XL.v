@@ -46,13 +46,19 @@ module zx_fdd_interface (
     // ZX Spectrum Side Signals
     // ========================================================================
     
-    // ZX Spectrum Address Bus (minimal set - 8 lines)
-    // A4, A6-A12 not connected - creates more echoes but saves pins
-    input wire A0,
-    input wire A1,
+    // ZX Spectrum Address Bus (actual minimal set from GAL chips - 14 lines)
+    // A0, A1 not connected to GALs - saves 2 pins
     input wire A2,
     input wire A3,
+    input wire A4,
     input wire A5,
+    input wire A6,
+    input wire A7,
+    input wire A8,
+    input wire A9,
+    input wire A10,
+    input wire A11,
+    input wire A12,
     input wire A13,
     input wire A14,
     input wire A15,
@@ -184,16 +190,14 @@ assign gal16_o14 = ~(~A3 | ~A2);
 
 // f17: Page-in trigger - detects reads from 0x0000 or 0x0008
 // Original equation: /f17 = A10 + A9 + A2 + o13 + /M1
-// Simplified: removed A10, A9 (not connected)
+// All address lines present in original GAL chips
 // Goes LOW when accessing trigger addresses during normal memory access
-// WARNING: Will trigger on more addresses than original due to missing A9, A10
-assign gal16_f17 = ~(A2 | gal23_o13 | ~nM1);
+assign gal16_f17 = ~(A10 | A9 | A2 | gal23_o13 | ~nM1);
 
 // o12: Page-out trigger - detects access to 0x604 region
 // Original equation: /o12 = A10 * A9 * /A3 * A2 * /o13 * M1
-// Simplified: removed A10, A9 (not connected)
-// WARNING: Will trigger on more addresses than original due to missing A9, A10
-assign gal16_o12 = ~(~A3 & A2 & ~gal23_o13 & nM1);
+// All address lines present in original GAL chips
+assign gal16_o12 = ~(A10 & A9 & ~A3 & A2 & ~gal23_o13 & nM1);
 
 // f18: ZX ROM disable signal
 // Original equation: /f18 = /f17 * /paged_in
@@ -219,22 +223,24 @@ assign nZX_ROMCS = gal16_f18;
 
 // o13: Detects address 0x0000 or 0x0008 (trigger addresses for paging in)
 // Original equation: /o13 = /A12 * /A8 * /A11 * /A7 * /A6 * /A5 * /A4 * /p19 * /A1 * /A0
-// Simplified: removed A4, A6, A7, A8, A11, A12 (not connected)
-// Only checks A0, A1, A5 and range check (A13-A15)
-// WARNING: Will activate on more addresses than just 0x0000/0x0008
-assign gal23_o13 = ~(~A5 & ~gal16_o19 & ~A1 & ~A0);
+// Simplified: A0 and A1 not connected (not on GAL chips)
+// Checks A4-A8, A11-A12 and range check (A13-A15)
+// WARNING: Will activate when A4-A8,A11-A12 are low, regardless of A0-A1
+assign gal23_o13 = ~(~A12 & ~A8 & ~A11 & ~A7 & ~A6 & ~A5 & ~A4 & ~gal16_o19);
 
 // o12: I/O write strobe - latches ZX side LS273
 // Original equation: o12 = /IORQ * /WR * A5 * /A4 * p14 * A1 * A0
-// Simplified: removed A4 (not connected), assumes A4=0
-// Detects I/O write to control port
-assign gal23_o12 = ~nIORQ & ~nWR & A5 & gal16_o14 & A1 & A0;
+// Simplified: A0, A1 not connected (not on GAL chips)
+// Detects I/O write when A5=1, A4=0, A3=1, A2=1 (from gal16_o14)
+// WARNING: Will respond to more I/O ports than original (A0, A1 ignored)
+assign gal23_o12 = ~nIORQ & ~nWR & A5 & ~A4 & gal16_o14;
 
 // o19: I/O read strobe - enables ZX side LS244 output
 // Original equation: /o19 = /IORQ * /RD * A5 * /A4 * p14 * A1 * A0
-// Simplified: removed A4 (not connected), assumes A4=0
-// Detects I/O read from control port (same address as write)
-assign gal23_o19 = ~(~nIORQ & ~nRD & A5 & gal16_o14 & A1 & A0);
+// Simplified: A0, A1 not connected (not on GAL chips)
+// Detects I/O read when A5=1, A4=0, A3=1, A2=1 (from gal16_o14)
+// WARNING: Will respond to more I/O ports than original (A0, A1 ignored)
+assign gal23_o19 = ~(~nIORQ & ~nRD & A5 & ~A4 & gal16_o14);
 
 // ============================================================================
 // Page-in/out Flip-Flop (replaces LS109 J-K flip-flop)
@@ -317,11 +323,9 @@ endmodule
 // Pin Count Summary for XC9572XL
 // ============================================================================
 //
-// Inputs (17 pins):
+// Inputs (23 pins):
 //   - CLK_16MHZ      : 1 pin (clock input)
-//   - A0, A1, A2, A3 : 4 pins (ZX address bus - lower bits)
-//   - A5             : 1 pin (ZX address bus - for I/O decode)
-//   - A13, A14, A15  : 3 pins (ZX address bus - upper bits for memory decode)
+//   - A2-A15         : 14 pins (ZX address bus - actual lines from GAL chips)
 //   - nIORQ          : 1 pin
 //   - nMREQ          : 1 pin
 //   - nRD            : 1 pin
@@ -331,9 +335,8 @@ endmodule
 //   - nTIOUT         : 1 pin
 //   - WD1770_DRQ     : 1 pin
 //
-// Address lines NOT connected (saves 8 pins):
-//   - A4, A6, A7, A8, A9, A10, A11, A12
-//   - Creates more address echoes/aliases but acceptable for retro systems
+// Address lines NOT connected (saves 2 pins):
+//   - A0, A1 (not used by original GAL chips)
 //
 // Outputs (5 pins):
 //   - nZX_ROMCS      : 1 pin
@@ -346,11 +349,11 @@ endmodule
 //   - D0, D1, D4-D7  : 6 pins (ZX data bus)
 //   - FDD_D0, D1, D4-D7 : 6 pins (FDD data bus)
 //
-// Total I/O: 34 pins
+// Total I/O: 40 pins
 //
 // Package requirements:
-//   - XC9572XL-VQ64: 64 pins total, 52 I/O available → FITS with 18 spare pins
-//   - XC9572XL-TQ44: 44 pins total, 36 I/O available → FITS with 2 spare pins!
+//   - XC9572XL-VQ64: 64 pins total, 52 I/O available → FITS with 12 spare pins
+//   - XC9572XL-TQ44: 44 pins total, 36 I/O available → DOES NOT FIT (need 40, short by 4)
 //
 // JTAG pins (reserved on all packages):
 //   - TCK, TMS, TDI, TDO
