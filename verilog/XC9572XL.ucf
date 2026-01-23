@@ -1,0 +1,162 @@
+# ============================================================================
+# XC9572XL-VQ64 User Constraints File (UCF)
+# ZX Spectrum + Timex FDD Interface with Clock Generation
+# ============================================================================
+#
+# Pin assignment strategy:
+#   - North side (P1-P16):   ZX Address bus (convenient for ZX connector)
+#   - East side (P17-P32):   ZX Control + Data bus
+#   - South side (P33-P48):  FDD Data bus + Control
+#   - West side (P49-P64):   Clock, Chip selects, WD1770 signals
+#
+# JTAG pins are automatically reserved:
+#   P12 = TCK
+#   P13 = TMS
+#   P14 = TDI
+#   P42 = TDO
+#
+# Power pins (fixed):
+#   P22, P43, P64 = VCC
+#   P11, P32, P53 = GND
+#
+# ============================================================================
+
+# ============================================================================
+# Clock Input
+# ============================================================================
+
+NET "CLK_16MHZ" LOC = "P1" | IOSTANDARD = LVCMOS33;
+
+# ============================================================================
+# ZX Spectrum Address Bus (16 pins)
+# Grouped on north side for easy routing to ZX connector
+# ============================================================================
+
+NET "A<0>"  LOC = "P2"  | IOSTANDARD = TTL;
+NET "A<1>"  LOC = "P3"  | IOSTANDARD = TTL;
+NET "A<2>"  LOC = "P4"  | IOSTANDARD = TTL;
+NET "A<3>"  LOC = "P5"  | IOSTANDARD = TTL;
+NET "A<4>"  LOC = "P6"  | IOSTANDARD = TTL;
+NET "A<5>"  LOC = "P7"  | IOSTANDARD = TTL;
+NET "A<6>"  LOC = "P8"  | IOSTANDARD = TTL;
+NET "A<7>"  LOC = "P9"  | IOSTANDARD = TTL;
+NET "A<8>"  LOC = "P10" | IOSTANDARD = TTL;
+# P11 = GND (fixed)
+# P12 = TCK (JTAG)
+# P13 = TMS (JTAG)
+# P14 = TDI (JTAG)
+NET "A<9>"  LOC = "P15" | IOSTANDARD = TTL;
+NET "A<10>" LOC = "P16" | IOSTANDARD = TTL;
+NET "A<11>" LOC = "P17" | IOSTANDARD = TTL;
+NET "A<12>" LOC = "P18" | IOSTANDARD = TTL;
+NET "A<13>" LOC = "P19" | IOSTANDARD = TTL;
+NET "A<14>" LOC = "P20" | IOSTANDARD = TTL;
+NET "A<15>" LOC = "P21" | IOSTANDARD = TTL;
+
+# ============================================================================
+# ZX Spectrum Control Signals (5 pins)
+# ============================================================================
+
+# P22 = VCC (fixed)
+NET "nIORQ" LOC = "P23" | IOSTANDARD = TTL;
+NET "nMREQ" LOC = "P24" | IOSTANDARD = TTL;
+NET "nRD"   LOC = "P25" | IOSTANDARD = TTL;
+NET "nWR"   LOC = "P26" | IOSTANDARD = TTL;
+NET "nM1"   LOC = "P27" | IOSTANDARD = TTL;
+
+# ============================================================================
+# ZX Spectrum Data Bus (6 pins used: D0, D1, D4, D5, D6, D7)
+# Bidirectional signals
+# ============================================================================
+
+NET "D0"    LOC = "P28" | IOSTANDARD = TTL;
+NET "D1"    LOC = "P29" | IOSTANDARD = TTL;
+NET "D4"    LOC = "P30" | IOSTANDARD = TTL;
+NET "D5"    LOC = "P31" | IOSTANDARD = TTL;
+# P32 = GND (fixed)
+NET "D6"    LOC = "P33" | IOSTANDARD = TTL;
+NET "D7"    LOC = "P34" | IOSTANDARD = TTL;
+
+# ============================================================================
+# FDD Z80 Data Bus (6 pins used: D0, D1, D4, D5, D6, D7)
+# Bidirectional signals
+# ============================================================================
+
+NET "FDD_D0" LOC = "P35" | IOSTANDARD = TTL;
+NET "FDD_D1" LOC = "P36" | IOSTANDARD = TTL;
+NET "FDD_D4" LOC = "P37" | IOSTANDARD = TTL;
+NET "FDD_D5" LOC = "P38" | IOSTANDARD = TTL;
+NET "FDD_D6" LOC = "P39" | IOSTANDARD = TTL;
+NET "FDD_D7" LOC = "P40" | IOSTANDARD = TTL;
+
+# ============================================================================
+# FDD Control Signals (2 pins)
+# ============================================================================
+
+NET "nTIIN"  LOC = "P41" | IOSTANDARD = TTL;
+# P42 = TDO (JTAG)
+# P43 = VCC (fixed)
+NET "nTIOUT" LOC = "P44" | IOSTANDARD = TTL;
+
+# ============================================================================
+# WD1770 FDC Signal (1 pin)
+# ============================================================================
+
+NET "WD1770_DRQ" LOC = "P45" | IOSTANDARD = TTL;
+
+# ============================================================================
+# Clock Outputs (2 pins)
+# ============================================================================
+
+NET "CLK_8MHZ" LOC = "P46" | IOSTANDARD = LVCMOS33 | SLEW = FAST;
+NET "CLK_4MHZ" LOC = "P47" | IOSTANDARD = LVCMOS33 | SLEW = FAST;
+
+# ============================================================================
+# Chip Select Outputs (3 pins)
+# ============================================================================
+
+NET "nZX_ROMCS" LOC = "P48" | IOSTANDARD = TTL;
+NET "nROM_CS"   LOC = "P49" | IOSTANDARD = TTL;
+NET "nRAM_CS"   LOC = "P50" | IOSTANDARD = TTL;
+
+# ============================================================================
+# Spare Pins Available for Future Expansion
+# ============================================================================
+# P51, P52, P54, P55, P56, P57, P58, P59, P60, P61, P62, P63
+# (10 spare I/O pins available)
+# P53 = GND (fixed)
+# P64 = VCC (fixed)
+
+# ============================================================================
+# Global Constraints
+# ============================================================================
+
+# Clock timing constraint for 16MHz input
+NET "CLK_16MHZ" TNM_NET = "CLK_16MHZ";
+TIMESPEC "TS_CLK_16MHZ" = PERIOD "CLK_16MHZ" 62.5 ns HIGH 50%;
+
+# ============================================================================
+# Pin Assignment Summary
+# ============================================================================
+#
+# ZX Spectrum Bus:
+#   - Address: P2-P10, P15-P21 (16 pins)
+#   - Control: P23-P27 (5 pins)
+#   - Data:    P28-P31, P33-P34 (6 pins)
+#   
+# FDD System:
+#   - Data:    P35-P40 (6 pins)
+#   - Control: P41, P44 (2 pins)
+#   - WD1770:  P45 (1 pin)
+#
+# Clocks:
+#   - Input:   P1 (16MHz)
+#   - Outputs: P46 (8MHz), P47 (4MHz)
+#
+# Chip Selects:
+#   - P48, P49, P50 (3 pins)
+#
+# Total used: 42 I/O pins
+# Spare pins: 10 pins
+#
+# ============================================================================
