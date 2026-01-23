@@ -46,8 +46,16 @@ module zx_fdd_interface (
     // ZX Spectrum Side Signals
     // ========================================================================
     
-    // ZX Spectrum Address Bus
-    input wire [15:0] A,
+    // ZX Spectrum Address Bus (minimal set - 8 lines)
+    // A4, A6-A12 not connected - creates more echoes but saves pins
+    input wire A0,
+    input wire A1,
+    input wire A2,
+    input wire A3,
+    input wire A5,
+    input wire A13,
+    input wire A14,
+    input wire A15,
     
     // ZX Spectrum Control Signals
     input wire nIORQ,    // Active low I/O request
@@ -166,21 +174,26 @@ assign CLK_4MHZ = clk_4mhz_counter;
 
 // o19: Detects address in 0x0000-0x1FFF range (first 8KB)
 // Original equation: /o19 = /A14 * /A15 * /A13
-assign gal16_o19 = ~(~A[15] & ~A[14] & ~A[13]);
+// Simplified: only uses A13-A15
+assign gal16_o19 = ~(~A15 & ~A14 & ~A13);
 
 // o14: Detects A3=1 AND A2=1 (used for I/O port address decoding)
 // Original equation: /o14 = /A3 + /A2
 // This goes LOW when both A3 and A2 are HIGH
-assign gal16_o14 = ~(~A[3] | ~A[2]);
+assign gal16_o14 = ~(~A3 | ~A2);
 
 // f17: Page-in trigger - detects reads from 0x0000 or 0x0008
 // Original equation: /f17 = A10 + A9 + A2 + o13 + /M1
+// Simplified: removed A10, A9 (not connected)
 // Goes LOW when accessing trigger addresses during normal memory access
-assign gal16_f17 = ~(A[10] | A[9] | A[2] | gal23_o13 | ~nM1);
+// WARNING: Will trigger on more addresses than original due to missing A9, A10
+assign gal16_f17 = ~(A2 | gal23_o13 | ~nM1);
 
 // o12: Page-out trigger - detects access to 0x604 region
 // Original equation: /o12 = A10 * A9 * /A3 * A2 * /o13 * M1
-assign gal16_o12 = ~(A[10] & A[9] & ~A[3] & A[2] & ~gal23_o13 & nM1);
+// Simplified: removed A10, A9 (not connected)
+// WARNING: Will trigger on more addresses than original due to missing A9, A10
+assign gal16_o12 = ~(~A3 & A2 & ~gal23_o13 & nM1);
 
 // f18: ZX ROM disable signal
 // Original equation: /f18 = /f17 * /paged_in
@@ -189,13 +202,13 @@ assign gal16_f18 = ~(~gal16_f17 & ~paged_in);
 
 // nROM_CS: Interface ROM chip select (active for 0x0000-0x1FFF when paged in)
 // Original equation: /o16 = /A14 * /A15 * /A13 * f18 * MREQ
-// Only A15, A14, A13 are decoded, so 4KB ROM appears at 0x0000 and mirrors at 0x1000
-assign nROM_CS = ~(~A[15] & ~A[14] & ~A[13] & gal16_f18 & ~nMREQ);
+// Only A15, A14, A13 are decoded, so 4KB ROM echoes throughout 0x0000-0x1FFF
+assign nROM_CS = ~(~A15 & ~A14 & ~A13 & gal16_f18 & ~nMREQ);
 
 // nRAM_CS: Interface RAM chip select (active for 0x2000-0x3FFF when paged in)
 // Original equation: /o15 = /A14 * /A15 * A13 * f18 * MREQ
-// Only A15, A14, A13 are decoded, so 2KB RAM appears at 0x2000 and mirrors 3 times
-assign nRAM_CS = ~(~A[15] & ~A[14] & A[13] & gal16_f18 & ~nMREQ);
+// Only A15, A14, A13 are decoded, so 2KB RAM echoes throughout 0x2000-0x3FFF
+assign nRAM_CS = ~(~A15 & ~A14 & A13 & gal16_f18 & ~nMREQ);
 
 // nZX_ROMCS: Disable ZX Spectrum ROM when interface is paged in
 assign nZX_ROMCS = gal16_f18;
@@ -206,19 +219,22 @@ assign nZX_ROMCS = gal16_f18;
 
 // o13: Detects address 0x0000 or 0x0008 (trigger addresses for paging in)
 // Original equation: /o13 = /A12 * /A8 * /A11 * /A7 * /A6 * /A5 * /A4 * /p19 * /A1 * /A0
-// All specified address bits must be 0, and address must be in 0x0000-0x1FFF range
-assign gal23_o13 = ~(~A[12] & ~A[8] & ~A[11] & ~A[7] & ~A[6] & 
-                     ~A[5] & ~A[4] & ~gal16_o19 & ~A[1] & ~A[0]);
+// Simplified: removed A4, A6, A7, A8, A11, A12 (not connected)
+// Only checks A0, A1, A5 and range check (A13-A15)
+// WARNING: Will activate on more addresses than just 0x0000/0x0008
+assign gal23_o13 = ~(~A5 & ~gal16_o19 & ~A1 & ~A0);
 
 // o12: I/O write strobe - latches ZX side LS273
 // Original equation: o12 = /IORQ * /WR * A5 * /A4 * p14 * A1 * A0
-// Detects I/O write to control port (with A5=1, A4=0, A3=1, A2=1, A1=1, A0=1)
-assign gal23_o12 = ~nIORQ & ~nWR & A[5] & ~A[4] & gal16_o14 & A[1] & A[0];
+// Simplified: removed A4 (not connected), assumes A4=0
+// Detects I/O write to control port
+assign gal23_o12 = ~nIORQ & ~nWR & A5 & gal16_o14 & A1 & A0;
 
 // o19: I/O read strobe - enables ZX side LS244 output
 // Original equation: /o19 = /IORQ * /RD * A5 * /A4 * p14 * A1 * A0
+// Simplified: removed A4 (not connected), assumes A4=0
 // Detects I/O read from control port (same address as write)
-assign gal23_o19 = ~(~nIORQ & ~nRD & A[5] & ~A[4] & gal16_o14 & A[1] & A[0]);
+assign gal23_o19 = ~(~nIORQ & ~nRD & A5 & gal16_o14 & A1 & A0);
 
 // ============================================================================
 // Page-in/out Flip-Flop (replaces LS109 J-K flip-flop)
@@ -301,9 +317,11 @@ endmodule
 // Pin Count Summary for XC9572XL
 // ============================================================================
 //
-// Inputs (25 pins):
+// Inputs (17 pins):
 //   - CLK_16MHZ      : 1 pin (clock input)
-//   - A[15:0]        : 16 pins (ZX address bus)
+//   - A0, A1, A2, A3 : 4 pins (ZX address bus - lower bits)
+//   - A5             : 1 pin (ZX address bus - for I/O decode)
+//   - A13, A14, A15  : 3 pins (ZX address bus - upper bits for memory decode)
 //   - nIORQ          : 1 pin
 //   - nMREQ          : 1 pin
 //   - nRD            : 1 pin
@@ -312,6 +330,10 @@ endmodule
 //   - nTIIN          : 1 pin
 //   - nTIOUT         : 1 pin
 //   - WD1770_DRQ     : 1 pin
+//
+// Address lines NOT connected (saves 8 pins):
+//   - A4, A6, A7, A8, A9, A10, A11, A12
+//   - Creates more address echoes/aliases but acceptable for retro systems
 //
 // Outputs (5 pins):
 //   - nZX_ROMCS      : 1 pin
@@ -324,11 +346,11 @@ endmodule
 //   - D0, D1, D4-D7  : 6 pins (ZX data bus)
 //   - FDD_D0, D1, D4-D7 : 6 pins (FDD data bus)
 //
-// Total I/O: 42 pins
+// Total I/O: 34 pins
 //
 // Package requirements:
-//   - XC9572XL-VQ64: 64 pins total, 52 I/O available → FITS with 10 spare pins
-//   - XC9572XL-TQ44: 44 pins total, 36 I/O available → DOES NOT FIT (need 42)
+//   - XC9572XL-VQ64: 64 pins total, 52 I/O available → FITS with 18 spare pins
+//   - XC9572XL-TQ44: 44 pins total, 36 I/O available → FITS with 2 spare pins!
 //
 // JTAG pins (reserved on all packages):
 //   - TCK, TMS, TDI, TDO
