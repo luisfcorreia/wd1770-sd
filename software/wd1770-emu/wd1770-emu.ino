@@ -62,10 +62,12 @@
 
 // Display customization
 #define DISPLAY_HEADER  "WD1770 Emu"  // Max 16 chars
+#define LASTIMG_CONFIG  "LASTIMG.CFG"  // Config file for last loaded images
 
-// I2C pins for OLED
-#define OLED_SDA        PB11
-#define OLED_SCL        PB10
+// I2C pins for OLED (Black Pill compatible)
+// Note: PB11 is NOT exposed on Black Pill board
+#define OLED_SDA        PB14  // I2C Data (software I2C)
+#define OLED_SCL        PB10  // I2C Clock (software I2C)
 #define SCREEN_WIDTH    128
 #define SCREEN_HEIGHT   64
 #define OLED_RESET      -1
@@ -74,6 +76,7 @@
 // ===================== CONSTANTS =====================
 
 #define MAX_DRIVES      2
+#define CONFIG_FILE     "/LASTIMG.CFG"
 
 // Register addresses
 #define REG_STATUS_CMD  0
@@ -182,18 +185,22 @@ typedef struct {
   uint16_t sectorSize;
   bool doubleDensity;
   bool writeProtected;
+  bool isExtendedDSK;       // True if Extended DSK format with headers
+  uint16_t headerOffset;    // Offset to skip headers (256 bytes typically)
+  uint16_t trackHeaderSize; // Track Information Block size (256 bytes)
 } DiskImage;
 
 // ===================== GLOBAL VARIABLES =====================
 
 FDCState fdc;
 DiskImage disks[MAX_DRIVES];
-File imageFiles[MAX_DRIVES];
+// No longer keeping files open - open/read/write/close per operation for safety
 uint8_t activeDrive = 0;
 uint8_t dataPins[] = {PIN_D0, PIN_D1, PIN_D2, PIN_D3, PIN_D4, PIN_D5, PIN_D6, PIN_D7};
 
 String diskImages[100];
 int currentImageIndex[MAX_DRIVES] = {0, 0};
+int loadedImageIndex[MAX_DRIVES] = {-1, -1};  // Track which image is loaded (-1 = none)
 int totalImages = 0;
 bool oledPresent = false;
 uint8_t uiSelectedDrive = 0;
@@ -207,12 +214,18 @@ volatile bool lastWE = HIGH;
 uint32_t dataValidUntil = 0;
 bool dataBusDriven = false;
 
+// Last image config file
+#define LASTIMG_FILE "/lastimg.cfg"
+
 // ===================== FUNCTION PROTOTYPES =====================
 
 void initPins();
 bool initSDCard();
 void scanDiskImages();
 bool loadDiskImage(uint8_t drive, int imageIndex);
+bool parseExtendedDSKHeader(uint8_t drive, const String& filename);
+void saveLastImageConfig();
+void loadLastImageConfig();
 void initFDC();
 void handleRead(uint8_t addr);
 void handleWrite(uint8_t addr);
@@ -239,6 +252,9 @@ void setup() {
 
   initPins();
 
+  // Initialize I2C with explicit pins (Black Pill compatible)
+  Wire.setSDA(OLED_SDA);
+  Wire.setSCL(OLED_SCL);
   Wire.begin();
   Wire.setClock(400000);
 
@@ -274,10 +290,16 @@ void setup() {
 
   scanDiskImages();
 
+  // Load last used images from config, or defaults if no config
   if (totalImages > 0) {
-    loadDiskImage(0, 0);
-    if (totalImages > 1) {
-      loadDiskImage(1, 1);
+    loadLastImageConfig();
+    
+    // If config didn't load anything (first boot), use defaults
+    if (loadedImageIndex[0] == -1) {
+      loadDiskImage(0, 0);
+      if (totalImages > 1) {
+        loadDiskImage(1, 1);
+      }
     }
   }
 
@@ -425,18 +447,15 @@ void scanDiskImages() {
 }
 
 bool loadDiskImage(uint8_t drive, int imageIndex) {
-  if (drive >= MAX_DRIVES || imageIndex >= totalImages) {
+  if (drive >= MAX_DRIVES || imageIndex >= totalImages || imageIndex < 0) {
     return false;
   }
 
-  if (imageFiles[drive]) {
-    imageFiles[drive].close();
-  }
-
   String filename = "/" + diskImages[imageIndex];
-  imageFiles[drive] = SD.open(filename.c_str(), FILE_WRITE);
-
-  if (!imageFiles[drive]) {
+  
+  // Open file temporarily to get metadata
+  File imageFile = SD.open(filename.c_str(), FILE_READ);
+  if (!imageFile) {
     Serial.print("Failed to open: ");
     Serial.println(filename);
     return false;
@@ -445,38 +464,105 @@ bool loadDiskImage(uint8_t drive, int imageIndex) {
   DiskImage* disk = &disks[drive];
   strncpy(disk->filename, diskImages[imageIndex].c_str(), 63);
   disk->filename[63] = '\0';
-  disk->size = imageFiles[drive].size();
+  disk->size = imageFile.size();
+  imageFile.close();  // Close immediately after getting metadata
 
   // Detect format by size
-  if (disk->size == 737280) {  // 720KB
-    disk->tracks = 80;
-    disk->sectorsPerTrack = 9;
-    disk->sectorSize = 512;
-    disk->doubleDensity = true;
-  } else if (disk->size == 368640) {  // 360KB
-    disk->tracks = 40;
-    disk->sectorsPerTrack = 9;
-    disk->sectorSize = 512;
-    disk->doubleDensity = true;
-  } else if (disk->size == 163840) {  // 160KB Timex
+  // PRIORITY: Timex FDD 3000 (most common format for this project)
+  if (disk->size == 163840) {  // 160KB - Timex FDD 3000 Single-Sided
     disk->tracks = 40;
     disk->sectorsPerTrack = 16;
     disk->sectorSize = 256;
     disk->doubleDensity = false;
-  } else if (disk->size == 327680) {  // 320KB Timex DS
-    disk->tracks = 80;
+    Serial.println("  Format: Timex FDD 3000 (40T/16S/256B)");
+  } else if (disk->size == 327680) {  // 320KB - Timex FDD 3000 Double-Sided
+    disk->tracks = 80;  // 40 tracks × 2 sides = 80 logical tracks
     disk->sectorsPerTrack = 16;
     disk->sectorSize = 256;
     disk->doubleDensity = false;
+    Serial.println("  Format: Timex FDD 3000 DS (80T/16S/256B)");
+  } else if (disk->size == 737280) {  // 720KB - Standard 3.5" DD
+    disk->tracks = 80;
+    disk->sectorsPerTrack = 9;
+    disk->sectorSize = 512;
+    disk->doubleDensity = true;
+    Serial.println("  Format: 3.5\" DD (80T/9S/512B)");
+  } else if (disk->size == 368640) {  // 360KB - Standard 5.25" DD
+    disk->tracks = 40;
+    disk->sectorsPerTrack = 9;
+    disk->sectorSize = 512;
+    disk->doubleDensity = true;
+    Serial.println("  Format: 5.25\" DD (40T/9S/512B)");
+  } else if (disk->size == 184320) {  // 180KB - Amstrad CPC/Spectrum +3 (raw)
+    disk->tracks = 40;
+    disk->sectorsPerTrack = 9;
+    disk->sectorSize = 512;
+    disk->doubleDensity = true;
+    Serial.println("  Format: Amstrad/Spectrum raw (40T/9S/512B)");
+  } else if (disk->size == 174336) {  // 170KB - Extended DSK (Amstrad/Spectrum)
+    disk->tracks = 40;
+    disk->sectorsPerTrack = 9;
+    disk->sectorSize = 512;
+    disk->doubleDensity = true;
+    Serial.println("  Format: Extended DSK (Amstrad/Spectrum)");
   } else {
-    // Unknown format, try to guess
-    disk->tracks = 80;
-    disk->sectorsPerTrack = 9;
-    disk->sectorSize = 512;
-    disk->doubleDensity = true;
+    // Unknown format - default to Timex-compatible geometry
+    Serial.print("  Warning: Unknown size ");
+    Serial.print(disk->size);
+    Serial.println(" bytes");
+    
+    // Try Timex format first (256-byte sectors)
+    uint32_t sectors256 = disk->size / 256;
+    if (sectors256 == 640) {  // 40 × 16
+      disk->tracks = 40;
+      disk->sectorsPerTrack = 16;
+      disk->sectorSize = 256;
+      disk->doubleDensity = false;
+      Serial.println("  Guessing: Timex format (40T/16S/256B)");
+    } else if (sectors256 == 1280) {  // 80 × 16
+      disk->tracks = 80;
+      disk->sectorsPerTrack = 16;
+      disk->sectorSize = 256;
+      disk->doubleDensity = false;
+      Serial.println("  Guessing: Timex DS format (80T/16S/256B)");
+    } else {
+      // Fall back to 512-byte sectors
+      uint32_t sectors512 = disk->size / 512;
+      if (sectors512 < 720) {
+        disk->tracks = 40;
+        disk->sectorsPerTrack = sectors512 / 40;
+      } else {
+        disk->tracks = 80;
+        disk->sectorsPerTrack = sectors512 / 80;
+      }
+      disk->sectorSize = 512;
+      disk->doubleDensity = true;
+      Serial.print("  Guessing: ");
+      Serial.print(disk->tracks);
+      Serial.print("T/");
+      Serial.print(disk->sectorsPerTrack);
+      Serial.println("S/512B");
+    }
   }
 
   disk->writeProtected = false;
+  disk->isExtendedDSK = false;
+  disk->headerOffset = 0;
+  disk->trackHeaderSize = 0;
+  loadedImageIndex[drive] = imageIndex;
+  
+  // Check ALL .DSK files for Extended DSK header (not just certain sizes)
+  // Extended DSK can wrap any format: Timex, Amstrad, Spectrum, etc.
+  String fullFilename = "/" + diskImages[imageIndex];
+  String ext = fullFilename;
+  ext.toUpperCase();
+  
+  if (ext.endsWith(".DSK") || ext.endsWith(".HFE")) {
+    // Try to parse as Extended DSK - this will read actual geometry from header
+    if (parseExtendedDSKHeader(drive, fullFilename)) {
+      Serial.println("  Extended DSK header parsed successfully");
+    }
+  }
 
   Serial.print("Drive ");
   Serial.print(drive);
@@ -492,7 +578,140 @@ bool loadDiskImage(uint8_t drive, int imageIndex) {
   Serial.print(disk->sectorSize);
   Serial.println("B)");
 
+  // Save to config file
+  saveLastImageConfig();
+
   return true;
+}
+
+bool parseExtendedDSKHeader(uint8_t drive, const String& filename) {
+  File imageFile = SD.open(filename.c_str(), FILE_READ);
+  if (!imageFile) {
+    return false;
+  }
+  
+  // Read first 256 bytes (Disk Information Block)
+  uint8_t diskHeader[256];
+  if (imageFile.read(diskHeader, 256) != 256) {
+    imageFile.close();
+    return false;
+  }
+  
+  // Check for Extended DSK signature
+  if (strncmp((char*)diskHeader, "EXTENDED CPC DSK", 16) != 0 &&
+      strncmp((char*)diskHeader, "MV - CPCEMU Disk", 16) != 0) {
+    imageFile.close();
+    return false;  // Not Extended DSK format
+  }
+  
+  DiskImage* disk = &disks[drive];
+  
+  // Parse Disk Information Block
+  disk->tracks = diskHeader[0x30];      // Number of tracks
+  uint8_t sides = diskHeader[0x31];     // Number of sides (1 or 2)
+  
+  // Read first Track Information Block to get sector info
+  uint8_t trackHeader[256];
+  if (imageFile.read(trackHeader, 256) != 256) {
+    imageFile.close();
+    return false;
+  }
+  imageFile.close();
+  
+  // Parse Track Information Block
+  // Check signature "Track-Info\r\n"
+  if (strncmp((char*)trackHeader, "Track-Info", 10) != 0) {
+    Serial.println("  Warning: Invalid Track-Info signature");
+    return false;
+  }
+  
+  // Offset 0x15: Number of sectors per track
+  disk->sectorsPerTrack = trackHeader[0x15];
+  
+  // Offset 0x14: Sector size code (0=128, 1=256, 2=512, 3=1024, etc.)
+  uint8_t sectorSizeCode = trackHeader[0x14];
+  disk->sectorSize = 128 << sectorSizeCode;  // Convert code to actual size
+  
+  // Set Extended DSK flags
+  disk->isExtendedDSK = true;
+  disk->headerOffset = 256;           // Skip Disk Information Block
+  disk->trackHeaderSize = 256;        // Each track has 256-byte header
+  
+  // Determine density based on sector size and format
+  disk->doubleDensity = (disk->sectorSize >= 512);
+  
+  Serial.print("  Extended DSK: ");
+  Serial.print(disk->tracks);
+  Serial.print("T/");
+  Serial.print(disk->sectorsPerTrack);
+  Serial.print("S/");
+  Serial.print(disk->sectorSize);
+  Serial.print("B, ");
+  Serial.print(sides);
+  Serial.print(" side(s)");
+  
+  // Identify likely format
+  if (disk->sectorSize == 256 && disk->sectorsPerTrack == 16) {
+    Serial.println(" [Timex FDD 3000]");
+  } else if (disk->sectorSize == 512 && disk->sectorsPerTrack == 9) {
+    Serial.println(" [Amstrad/Spectrum]");
+  } else {
+    Serial.println();
+  }
+  
+  return true;
+}
+
+void saveLastImageConfig() {
+  File configFile = SD.open(LASTIMG_FILE, FILE_WRITE);
+  if (!configFile) {
+    Serial.println("Warning: Could not save config");
+    return;
+  }
+  
+  // Write format: drive0_index,drive1_index
+  configFile.print(loadedImageIndex[0]);
+  configFile.print(",");
+  configFile.println(loadedImageIndex[1]);
+  configFile.close();
+  
+  Serial.print("Saved config: Drive 0=");
+  Serial.print(loadedImageIndex[0]);
+  Serial.print(", Drive 1=");
+  Serial.println(loadedImageIndex[1]);
+}
+
+void loadLastImageConfig() {
+  File configFile = SD.open(LASTIMG_FILE, FILE_READ);
+  if (!configFile) {
+    Serial.println("No config file found, using defaults");
+    return;
+  }
+  
+  String line = configFile.readStringUntil('\n');
+  configFile.close();
+  
+  int commaPos = line.indexOf(',');
+  if (commaPos > 0) {
+    int drive0 = line.substring(0, commaPos).toInt();
+    int drive1 = line.substring(commaPos + 1).toInt();
+    
+    Serial.print("Loaded config: Drive 0=");
+    Serial.print(drive0);
+    Serial.print(", Drive 1=");
+    Serial.println(drive1);
+    
+    // Validate and load
+    if (drive0 >= 0 && drive0 < totalImages) {
+      loadDiskImage(0, drive0);
+      currentImageIndex[0] = drive0;
+    }
+    
+    if (drive1 >= 0 && drive1 < totalImages) {
+      loadDiskImage(1, drive1);
+      currentImageIndex[1] = drive1;
+    }
+  }
 }
 
 void initFDC() {
@@ -840,11 +1059,38 @@ void startSectorRead() {
   }
 
   // Calculate offset
-  uint32_t offset = (fdc.currentTrack * currentDisk->sectorsPerTrack + (fdc.sector - 1)) * currentDisk->sectorSize;
+  uint32_t offset;
+  
+  if (currentDisk->isExtendedDSK) {
+    // Extended DSK format:
+    // Disk Info Block (256) + Track N * (Track Info Block (256) + Track Data)
+    uint32_t trackSize = currentDisk->trackHeaderSize + 
+                         (currentDisk->sectorsPerTrack * currentDisk->sectorSize);
+    offset = currentDisk->headerOffset +                    // Skip Disk Info Block (256)
+             (fdc.currentTrack * trackSize) +              // Skip to correct track
+             currentDisk->trackHeaderSize +                // Skip Track Info Block
+             ((fdc.sector - 1) * currentDisk->sectorSize); // Sector offset within track
+  } else {
+    // Raw sector format (no headers)
+    offset = (fdc.currentTrack * currentDisk->sectorsPerTrack + (fdc.sector - 1)) * currentDisk->sectorSize;
+  }
 
-  // Read from SD card (this is the slow part, but we handle it asynchronously)
-  imageFiles[activeDrive].seek(offset);
-  fdc.dataLength = imageFiles[activeDrive].read(fdc.sectorBuffer, currentDisk->sectorSize);
+  // Open, read, close immediately for safety
+  String filename = "/" + String(currentDisk->filename);
+  File imageFile = SD.open(filename.c_str(), FILE_READ);
+  if (!imageFile) {
+    Serial.println("Error: Could not open image file for reading");
+    fdc.status = ST_RNF;
+    fdc.busy = false;
+    fdc.intrq = true;
+    fdc.state = STATE_IDLE;
+    return;
+  }
+  
+  imageFile.seek(offset);
+  fdc.dataLength = imageFile.read(fdc.sectorBuffer, currentDisk->sectorSize);
+  imageFile.close();  // Close immediately
+  
   fdc.dataIndex = 0;
 
   // State machine will set DRQ after simulated delay
@@ -887,12 +1133,38 @@ void completeSectorWrite() {
   DiskImage* currentDisk = &disks[activeDrive];
 
   // Calculate offset
-  uint32_t offset = (fdc.currentTrack * currentDisk->sectorsPerTrack + (fdc.sector - 1)) * currentDisk->sectorSize;
+  uint32_t offset;
+  
+  if (currentDisk->isExtendedDSK) {
+    // Extended DSK format:
+    // Disk Info Block (256) + Track N * (Track Info Block (256) + Track Data)
+    uint32_t trackSize = currentDisk->trackHeaderSize + 
+                         (currentDisk->sectorsPerTrack * currentDisk->sectorSize);
+    offset = currentDisk->headerOffset +                    // Skip Disk Info Block (256)
+             (fdc.currentTrack * trackSize) +              // Skip to correct track
+             currentDisk->trackHeaderSize +                // Skip Track Info Block
+             ((fdc.sector - 1) * currentDisk->sectorSize); // Sector offset within track
+  } else {
+    // Raw sector format (no headers)
+    offset = (fdc.currentTrack * currentDisk->sectorsPerTrack + (fdc.sector - 1)) * currentDisk->sectorSize;
+  }
 
-  // Write to SD card
-  imageFiles[activeDrive].seek(offset);
-  imageFiles[activeDrive].write(fdc.sectorBuffer, currentDisk->sectorSize);
-  imageFiles[activeDrive].flush();
+  // Open, write, close immediately for safety
+  String filename = "/" + String(currentDisk->filename);
+  File imageFile = SD.open(filename.c_str(), FILE_WRITE);
+  if (!imageFile) {
+    Serial.println("Error: Could not open image file for writing");
+    fdc.status = ST_WRITE_PROTECT;
+    fdc.busy = false;
+    fdc.intrq = true;
+    fdc.state = STATE_IDLE;
+    return;
+  }
+  
+  imageFile.seek(offset);
+  imageFile.write(fdc.sectorBuffer, currentDisk->sectorSize);
+  imageFile.flush();  // Ensure data is written
+  imageFile.close();  // Close immediately
 }
 
 void cmdReadAddress() {
@@ -914,11 +1186,34 @@ void cmdReadAddress() {
 void cmdReadTrack() {
   DiskImage* currentDisk = &disks[activeDrive];
 
-  uint32_t offset = fdc.currentTrack * currentDisk->sectorsPerTrack * currentDisk->sectorSize;
+  uint32_t offset;
   uint16_t trackSize = currentDisk->sectorsPerTrack * currentDisk->sectorSize;
+  
+  if (currentDisk->isExtendedDSK) {
+    // Extended DSK: Skip to track data (past disk header, track headers, and previous track data)
+    uint32_t trackSizeTotal = currentDisk->trackHeaderSize + trackSize;
+    offset = currentDisk->headerOffset +                 // Skip Disk Info Block
+             (fdc.currentTrack * trackSizeTotal) +      // Skip to correct track
+             currentDisk->trackHeaderSize;              // Skip Track Info Block
+  } else {
+    // Raw format
+    offset = fdc.currentTrack * trackSize;
+  }
 
-  imageFiles[activeDrive].seek(offset);
-  fdc.dataLength = imageFiles[activeDrive].read(fdc.sectorBuffer, min(trackSize, (uint16_t)1024));
+  // Open, read, close immediately for safety
+  String filename = "/" + String(currentDisk->filename);
+  File imageFile = SD.open(filename.c_str(), FILE_READ);
+  if (!imageFile) {
+    Serial.println("Error: Could not open image file for reading track");
+    fdc.status = ST_RNF;
+    fdc.busy = false;
+    fdc.intrq = true;
+    return;
+  }
+  
+  imageFile.seek(offset);
+  fdc.dataLength = imageFile.read(fdc.sectorBuffer, min(trackSize, (uint16_t)1024));
+  imageFile.close();  // Close immediately
 
   fdc.dataIndex = 0;
   fdc.drq = true;
@@ -1117,57 +1412,92 @@ void showImageSelectionMenu() {
 // ===================== IMAGE SELECTION =====================
 
 void checkImageSelection() {
-  static int lastCLK = HIGH;
+  // State machine for encoder debouncing
+  static uint8_t lastEncoderState = 0;
+  static unsigned long lastEncoderChange = 0;
   static unsigned long lastDebounce = 0;
   static unsigned long buttonPressTime = 0;
   static bool buttonPressed = false;
   static bool inSelectionMode = false;
-
-  int clk = digitalRead(ROTARY_CLK);
-  int sw = digitalRead(ROTARY_SW);
-
-  if (clk != lastCLK && (millis() - lastDebounce > 5)) {
-    if (digitalRead(ROTARY_DT) != clk) {
-      currentImageIndex[uiSelectedDrive]++;
-      if (currentImageIndex[uiSelectedDrive] >= totalImages) {
-        currentImageIndex[uiSelectedDrive] = 0;
+  
+  // Encoder debouncing constants
+  const unsigned long ENCODER_DEBOUNCE_MS = 20;  // 20ms debounce for rotation
+  const unsigned long BUTTON_DEBOUNCE_MS = 50;   // 50ms debounce for button
+  
+  // Read current encoder state
+  int clkCurrent = digitalRead(ROTARY_CLK);
+  int dtCurrent = digitalRead(ROTARY_DT);
+  uint8_t currentState = (clkCurrent << 1) | dtCurrent;
+  
+  // Encoder rotation handling with debouncing
+  if (currentState != lastEncoderState) {
+    unsigned long now = millis();
+    
+    // Only process if enough time has passed (debounce)
+    if (now - lastEncoderChange > ENCODER_DEBOUNCE_MS) {
+      // Determine direction based on state change
+      // Standard quadrature encoding:
+      // CW:  00->10->11->01->00  (CLK leads DT)
+      // CCW: 00->01->11->10->00  (DT leads CLK)
+      
+      if (lastEncoderState == 0b00 && currentState == 0b10) {
+        // Started clockwise rotation
+        currentImageIndex[uiSelectedDrive]++;
+        if (currentImageIndex[uiSelectedDrive] >= totalImages) {
+          currentImageIndex[uiSelectedDrive] = 0;
+        }
+        inSelectionMode = true;
+        showImageSelectionMenu();
+        lastDebounce = now;
       }
-    } else {
-      currentImageIndex[uiSelectedDrive]--;
-      if (currentImageIndex[uiSelectedDrive] < 0) {
-        currentImageIndex[uiSelectedDrive] = totalImages - 1;
+      else if (lastEncoderState == 0b00 && currentState == 0b01) {
+        // Started counter-clockwise rotation
+        currentImageIndex[uiSelectedDrive]--;
+        if (currentImageIndex[uiSelectedDrive] < 0) {
+          currentImageIndex[uiSelectedDrive] = totalImages - 1;
+        }
+        inSelectionMode = true;
+        showImageSelectionMenu();
+        lastDebounce = now;
       }
+      
+      lastEncoderChange = now;
     }
-
-    inSelectionMode = true;
-    showImageSelectionMenu();
-    lastDebounce = millis();
+    
+    lastEncoderState = currentState;
   }
-
-  lastCLK = clk;
-
+  
+  // Exit selection mode after 3 seconds of inactivity
   if (inSelectionMode && (millis() - lastDebounce > 3000)) {
     inSelectionMode = false;
     updateDisplay();
   }
-
+  
+  // Button handling with debouncing
+  int sw = digitalRead(ROTARY_SW);
+  
   if (sw == LOW && !buttonPressed) {
     buttonPressed = true;
     buttonPressTime = millis();
   }
-
+  
   if (sw == HIGH && buttonPressed) {
     unsigned long pressDuration = millis() - buttonPressTime;
-
-    if (pressDuration >= 1000) {
-      uiSelectedDrive = 1 - uiSelectedDrive;
-      updateDisplay();
-    } else if (pressDuration >= 50) {
-      loadDiskImage(uiSelectedDrive, currentImageIndex[uiSelectedDrive]);
-      inSelectionMode = false;
-      updateDisplay();
+    
+    // Debounce: only accept presses longer than BUTTON_DEBOUNCE_MS
+    if (pressDuration >= BUTTON_DEBOUNCE_MS) {
+      if (pressDuration >= 1000) {
+        // Long press: switch between drives
+        uiSelectedDrive = 1 - uiSelectedDrive;
+        updateDisplay();
+      } else {
+        // Short press: load selected image
+        loadDiskImage(uiSelectedDrive, currentImageIndex[uiSelectedDrive]);
+        inSelectionMode = false;
+        updateDisplay();
+      }
     }
-
+    
     buttonPressed = false;
     buttonPressTime = 0;
   }
