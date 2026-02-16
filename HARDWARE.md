@@ -35,12 +35,12 @@ Complete hardware specifications, pinout, and wiring instructions for the WD1770
 ### Why STM32F411 Black Pill?
 
 **Advantages:**
-- ✅ **5V tolerant I/O** - No level shifters needed
-- ✅ **100MHz clock** - Fast enough for FDC timing
-- ✅ **512KB RAM** - Plenty for sector buffering
-- ✅ **Affordable** - $4-8 USD from AliExpress
-- ✅ **Available** - Easy to source
-- ✅ **Arduino support** - STM32duino framework
+- 5V tolerant I/O - No level shifters needed
+- 100MHz clock - Fast enough for FDC timing
+- 512KB RAM - Plenty for sector buffering
+- Affordable - $4-8 USD from AliExpress
+- Available - Easy to source
+- Arduino support - STM32duino framework
 
 **Specifications:**
 - ARM Cortex-M4 @ 100MHz
@@ -178,7 +178,7 @@ SDA        →   PB14 (NOT PB11!)
 ```
 
 **Important:**
-- ⚠️ **Use 3.3V only** - 5V will damage the OLED!
+- **Use 3.3V only** - 5V will damage the OLED!
 - PB11 is NOT exposed on Black Pill, use PB14
 - Add 4.7kΩ pull-ups on SDA/SCL if needed
 
@@ -314,8 +314,8 @@ GND ──┴──
 ### 3. Voltage Levels
 
 **5V Tolerance:**
-- ✅ All input pins (D0-D7, A0-A1, CS̅, R̅E̅, W̅E̅, D̅D̅E̅N̅, D̅S̅0̅, D̅S̅1̅) are 5V tolerant
-- ✅ Can connect directly to 5V host system
+- All input pins (D0-D7, A0-A1, CS̅, R̅E̅, W̅E̅, D̅D̅E̅N̅, D̅S̅0̅, D̅S̅1̅) are 5V tolerant
+- Can connect directly to 5V host system
 
 **Output Levels:**
 - INTRQ and DRQ output 3.3V

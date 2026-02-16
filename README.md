@@ -6,26 +6,26 @@ A drop-in replacement for the Western Digital WD1770/1772 Floppy Disk Controller
 
 ## Features
 
-- ✅ **Pin-compatible** WD1770/1772 replacement
-- ✅ **Dual drive support** (Drive 0 and Drive 1)
-- ✅ **SD card storage** - Load .DSK images from FAT32 SD card
-- ✅ **OLED display** - Visual feedback and image selection
-- ✅ **Rotary encoder** - Easy disk image browsing
-- ✅ **State machine** - Proper FDC timing and command handling
-- ✅ **Safe filesystem** - Open/close per operation, hot-swap safe
-- ✅ **Persistent config** - Remembers last loaded images
-- ✅ **Multiple formats** - Timex, Amstrad, Spectrum, standard DD/HD
+- Pin-compatible WD1770/1772 replacement
+- Dual drive support (Drive 0 and Drive 1)
+- SD card storage - Load .DSK images from FAT32 SD card
+- OLED display - Visual feedback and image selection
+- Rotary encoder - Easy disk image browsing
+- State machine - Proper FDC timing and command handling
+- Safe filesystem - Open/close per operation, hot-swap safe
+- Persistent config - Remembers last loaded images
+- Multiple formats - Timex, Amstrad, Spectrum, standard DD/HD
 
 ## Project Status
 
 **IN DEVELOPMENT - CODE COMPLETE, HARDWARE TESTING PENDING**
 
-- ✅ Complete code implementation with proper timing
-- ✅ Extended DSK format support with header parsing
-- ✅ Safe SD card handling (open/close per operation)
-- ✅ Better encoder debouncing (20ms)
-- ✅ Display improvements with track info
-- ⏳ **Awaiting real hardware testing**
+- Complete code implementation with proper timing
+- Extended DSK format support with header parsing
+- Safe SD card handling (open/close per operation)
+- Better encoder debouncing (20ms)
+- Display improvements with track info
+- **Awaiting real hardware testing**
 
 ## Hardware
 
