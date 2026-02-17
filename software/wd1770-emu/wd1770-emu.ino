@@ -6,6 +6,16 @@
    - U8g2 library (install via Arduino Library Manager)
    - Display driver: SH1106 128x64
    
+   TEST MODE:
+   - Set TEST_MODE=1 to simulate FDC signals without connecting to real hardware
+   - Simulates: DDEN=LOW (enabled), DS0=HIGH (drive 0), DS1=LOW (drive 1 disabled)
+   - Set TEST_MODE=0 when connecting to actual Timex or other system
+   
+   HARDWARE NOTES:
+   - Uses single R/W̅ pin (HIGH=read, LOW=write) like real WD1770 pin 2
+   - Data bus on PB0-PB7 for efficient parallel I/O
+   - OLED on PB14/PA3 (software I2C, avoid hardware I2C pins)
+   
    FIXES IMPLEMENTED:
    - Proper state machine for async operations
    - Non-blocking SD card I/O
@@ -14,7 +24,8 @@
    - Multi-sector command support
    - Bus timing improvements
    - U8g2 display library for SH1106 OLED
-   - USB-safe pin assignments (RE=PB15, WE=PB4)
+   - USB-safe pin assignments
+   - Fixed pin name collisions (PIN_A0/A1 → WD_A0/WD_A1)
    
    Inspired by FlashFloppy - reads disk images from SD card
    Supports standard floppy disk image formats
@@ -26,6 +37,9 @@
 #include <U8g2lib.h>
 
 // ===================== CONFIGURATION =====================
+
+// Test mode - simulates Timex system signals without actual hardware connected
+#define TEST_MODE  1  // Set to 0 when connecting to real hardware
 
 // SD Card SPI pins
 #define SD_CS_PIN       PA4
@@ -47,8 +61,7 @@
 #define WD_A0          PA8
 #define WD_A1          PA9
 #define WD_CS          PA10
-#define WD_RE          PB15  // Moved from PA11 (USB) and PA13 (SWD!)
-#define WD_WE          PB10  // Moved from PA12 (USB) and PA14 (SWD!), freed since OLED moved to PC14
+#define WD_RW          PB15  // R/W̅ pin: HIGH=read, LOW=write (was incorrectly split into RE/WE)
 
 // WD1770 Control Outputs
 #define WD_INTRQ       PA15
@@ -67,7 +80,6 @@
 
 // Display customization
 #define DISPLAY_HEADER  "WD1770 Emu"  // Max 16 chars
-#define LASTIMG_CONFIG  "LASTIMG.CFG"  // Config file for last loaded images
 
 // I2C pins for OLED - avoid PC14/PC15 (LSE oscillator pins!)
 #define OLED_SDA        PB14  // Free GPIO, not on any bus
@@ -80,7 +92,10 @@
 // ===================== CONSTANTS =====================
 
 #define MAX_DRIVES      2
-#define CONFIG_FILE     "/LASTIMG.CFG"
+
+// Config file stores last loaded disk images by filename (not index)
+// Format: "filename0,filename1" or "NONE,NONE" for empty drives
+#define LASTIMG_FILE "/lastimg.cfg"
 
 // Register addresses
 #define REG_STATUS_CMD  0
@@ -228,13 +243,9 @@ U8G2_SH1106_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, OLED_SCL, OLED_SDA, U8X8_PIN_NO
 
 // Bus state tracking
 volatile bool lastCS = HIGH;
-volatile bool lastRE = HIGH;
-volatile bool lastWE = HIGH;
+volatile bool lastRW = HIGH;
 uint32_t dataValidUntil = 0;
 bool dataBusDriven = false;
-
-// Last image config file
-#define LASTIMG_FILE "/lastimg.cfg"
 
 // ===================== FUNCTION PROTOTYPES =====================
 
@@ -366,34 +377,31 @@ void loop() {
   // Check which drive is selected by system
   checkDriveSelect();
 
-  // Handle bus transactions with edge detection
+  // Handle bus transactions
   bool currentCS = digitalRead(WD_CS);
-  bool currentRE = digitalRead(WD_RE);
-  bool currentWE = digitalRead(WD_WE);
+  bool currentRW = digitalRead(WD_RW);
 
-  // Chip select active
-  if (currentCS == LOW) {
+  // CS falling edge = new bus transaction
+  if (currentCS == LOW && lastCS == HIGH) {
     uint8_t addr = (digitalRead(WD_A1) << 1) | digitalRead(WD_A0);
-
-    // Read cycle: falling edge of RE
-    if (currentRE == LOW && lastRE == HIGH) {
-      handleRead(addr);
-      dataValidUntil = micros() + 500;
-    }
     
-    // Write cycle: falling edge of WE
-    if (currentWE == LOW && lastWE == HIGH) {
+    if (currentRW == HIGH) {
+      // R/W̅ HIGH = READ cycle (CPU reading from WD1770)
+      handleRead(addr);
+      dataValidUntil = micros() + 500;  // Keep data valid
+    } else {
+      // R/W̅ LOW = WRITE cycle (CPU writing to WD1770)
       handleWrite(addr);
     }
-  } else {
-    if (dataBusDriven && micros() >= dataValidUntil) {
-      releaseDataBus();
-    }
+  }
+  
+  // CS released, release data bus
+  if (currentCS == HIGH && dataBusDriven && micros() >= dataValidUntil) {
+    releaseDataBus();
   }
 
   lastCS = currentCS;
-  lastRE = currentRE;
-  lastWE = currentWE;
+  lastRW = currentRW;
 
   processStateMachine();
   updateOutputs();
@@ -409,12 +417,21 @@ void initPins() {
   pinMode(WD_A0, INPUT);
   pinMode(WD_A1, INPUT);
   pinMode(WD_CS, INPUT);
-  pinMode(WD_RE, INPUT);
-  pinMode(WD_WE, INPUT);
-  pinMode(WD_DDEN, INPUT_PULLUP);
+  pinMode(WD_RW, INPUT);  // Single R/W̅ pin
 
+#if TEST_MODE
+  // Test mode: Simulate Timex system signals
+  pinMode(WD_DDEN, INPUT_PULLDOWN);  // FDC always enabled (DDEN=LOW)
+  pinMode(WD_DS0, INPUT_PULLUP);     // Drive 0 always selected (DS0=HIGH)
+  pinMode(WD_DS1, INPUT_PULLDOWN);   // Drive 1 not selected (DS1=LOW)
+  Serial.println("TEST MODE: Simulating FDC signals");
+  Serial.println("  DDEN=LOW (enabled), DS0=HIGH (drive 0), DS1=LOW");
+#else
+  // Normal mode: Real hardware signals
+  pinMode(WD_DDEN, INPUT_PULLUP);
   pinMode(WD_DS0, INPUT_PULLUP);
   pinMode(WD_DS1, INPUT_PULLUP);
+#endif
 
   pinMode(WD_INTRQ, OUTPUT);
   pinMode(WD_DRQ, OUTPUT);
@@ -698,22 +715,38 @@ bool parseExtendedDSKHeader(uint8_t drive, const String& filename) {
 }
 
 void saveLastImageConfig() {
+  // Delete old config file to prevent appending
+  if (SD.exists(LASTIMG_FILE)) {
+    SD.remove(LASTIMG_FILE);
+  }
+  
   File configFile = SD.open(LASTIMG_FILE, FILE_WRITE);
   if (!configFile) {
     Serial.println("Warning: Could not save config");
     return;
   }
   
-  // Write format: drive0_index,drive1_index
-  configFile.print(loadedImageIndex[0]);
+  // Write format: drive0_filename,drive1_filename (or "NONE" for empty drive)
+  if (loadedImageIndex[0] >= 0 && loadedImageIndex[0] < totalImages) {
+    configFile.print(diskImages[loadedImageIndex[0]]);
+  } else {
+    configFile.print("NONE");
+  }
+  
   configFile.print(",");
-  configFile.println(loadedImageIndex[1]);
+  
+  if (loadedImageIndex[1] >= 0 && loadedImageIndex[1] < totalImages) {
+    configFile.println(diskImages[loadedImageIndex[1]]);
+  } else {
+    configFile.println("NONE");
+  }
+  
   configFile.close();
   
   Serial.print("Saved config: Drive 0=");
-  Serial.print(loadedImageIndex[0]);
+  Serial.print(loadedImageIndex[0] >= 0 ? diskImages[loadedImageIndex[0]] : "NONE");
   Serial.print(", Drive 1=");
-  Serial.println(loadedImageIndex[1]);
+  Serial.println(loadedImageIndex[1] >= 0 ? diskImages[loadedImageIndex[1]] : "NONE");
 }
 
 void loadLastImageConfig() {
@@ -723,35 +756,53 @@ void loadLastImageConfig() {
     return;
   }
   
-  char line[16];
+  // Read the config line (format: filename0,filename1)
+  char line[140];  // 64 + 1 + 64 + newline
   memset(line, 0, sizeof(line));
   int i = 0;
-  while (configFile.available() && i < 15) {
+  while (configFile.available() && i < 139) {
     char c = configFile.read();
-    if (c == '\n') break;
+    if (c == '\n' || c == '\r') break;
     line[i++] = c;
   }
   configFile.close();
   
+  // Parse filenames
   char* commaPtr = strchr(line, ',');
   if (commaPtr) {
-    int drive0 = atoi(line);
-    int drive1 = atoi(commaPtr + 1);
+    *commaPtr = '\0';  // Split at comma
+    char* filename0 = line;
+    char* filename1 = commaPtr + 1;
     
     Serial.print("Loaded config: Drive 0=");
-    Serial.print(drive0);
+    Serial.print(filename0);
     Serial.print(", Drive 1=");
-    Serial.println(drive1);
+    Serial.println(filename1);
     
-    // Validate and load
-    if (drive0 >= 0 && drive0 < totalImages) {
-      loadDiskImage(0, drive0);
-      currentImageIndex[0] = drive0;
+    // Find Drive 0 filename in diskImages array
+    if (strcmp(filename0, "NONE") != 0) {
+      for (int idx = 0; idx < totalImages; idx++) {
+        if (strcmp(diskImages[idx], filename0) == 0) {
+          loadDiskImage(0, idx);
+          currentImageIndex[0] = idx;
+          Serial.print("  Drive 0 found at index ");
+          Serial.println(idx);
+          break;
+        }
+      }
     }
     
-    if (drive1 >= 0 && drive1 < totalImages) {
-      loadDiskImage(1, drive1);
-      currentImageIndex[1] = drive1;
+    // Find Drive 1 filename in diskImages array
+    if (strcmp(filename1, "NONE") != 0) {
+      for (int idx = 0; idx < totalImages; idx++) {
+        if (strcmp(diskImages[idx], filename1) == 0) {
+          loadDiskImage(1, idx);
+          currentImageIndex[1] = idx;
+          Serial.print("  Drive 1 found at index ");
+          Serial.println(idx);
+          break;
+        }
+      }
     }
   }
 }
@@ -1413,9 +1464,13 @@ void displayNormalMode() {
     u8g2.drawStr(0, 54, buf);
   }
 
-  // Status line
-  u8g2.drawHLine(0, 56, 128);
+  // Status text (no separator line)
+#if TEST_MODE
+  u8g2.drawStr(0, 64, "TEST MODE");
+  u8g2.drawStr(68, 64, "Press=Menu");
+#else
   u8g2.drawStr(0, 64, "Press to select");
+#endif
   
   u8g2.sendBuffer();
 }
@@ -1559,7 +1614,7 @@ void displayConfirm() {
   // YES/NO toggle
   if (confirmYes) {
     u8g2.setDrawColor(1);
-    u8g2.drawBox(30, 42, 30, 12);
+    u8g2.drawBox(30, 42, 35, 12);  // Wider box to cover ']'
     u8g2.setDrawColor(0);
     u8g2.drawStr(35, 50, "[YES]");
     u8g2.setDrawColor(1);
@@ -1567,7 +1622,7 @@ void displayConfirm() {
   } else {
     u8g2.drawStr(35, 50, " YES ");
     u8g2.setDrawColor(1);
-    u8g2.drawBox(70, 42, 30, 12);
+    u8g2.drawBox(70, 42, 32, 12);  // Wider box to cover ']'
     u8g2.setDrawColor(0);
     u8g2.drawStr(75, 50, "[NO]");
     u8g2.setDrawColor(1);

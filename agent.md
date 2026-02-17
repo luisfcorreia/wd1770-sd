@@ -27,57 +27,25 @@ This is a WD1770/WD1772 Floppy Disk Controller replacement that uses an STM32F41
 
 ### Pin Assignments (FIXED - DO NOT CHANGE)
 **Data Bus:** PB0-PB7 (8 pins)
-**CPU Interface:** PA8 (A0), PA9 (A1), PA10 (CS), PA11 (RE), PA12 (WE)
+**CPU Interface:** PA8 (A0), PA9 (A1), PA10 (CS), PB15 (R/W)
 **FDC Control:** PA15 (INTRQ), PB8 (DRQ), PB9 (DDEN)
 **SD Card SPI:** PA4 (CS), PA5 (SCK), PA6 (MISO), PA7 (MOSI)
-**OLED I2C:** PB10 (SCL), PB11 (SDA)
+**OLED I2C:** PA3 (SCL), PB14 (SDA)
 **UI:** PC13 (LED), PA0-PA2 (Rotary encoder)
+
+**Reserved/Avoid**
+ USB D-  PA11  USB (do not use as GPIO)
+ USB D+  PA12  USB (do not use as GPIO)
+ SWDIO  PA13  SWD programming
+ SWDCLK  PA14  SWD programming
+ LSE_IN  PC14  Oscillator (causes crashes)
+ LSE_OUT  PC15  Oscillator (causes crashes)
 
 ### Supported Disk Formats
 - 720KB: 80 tracks, 9 sectors/track, 512 bytes/sector
 - 360KB: 40 tracks, 9 sectors/track, 512 bytes/sector
 - 160KB Timex: 40 tracks, 16 sectors/track, 256 bytes/sector
 - 320KB Timex: 40 tracks, 16 sectors/track, 256 bytes/sector (double-sided)
-
-### Code Organization
-```
-Global Variables:
-- FDCState fdc
-- DiskImage disks[2]
-- File imageFiles[2]
-- String diskImages[100]  // MUST be declared
-- activeDrive (which drive responds to FDC)
-- uiSelectedDrive (which drive UI configures)
-```
-
-### Common Mistakes to Avoid
-1. DO NOT add floppy drive interface pins
-2. DO NOT use non-existent STM32 pins (PC0, PC1, PC14, PC15)
-3. DO NOT forget to declare diskImages[] array
-4. DO NOT use SPI pin setup functions (setMOSI, etc.)
-5. DO NOT add emojis to documentation
-6. DO NOT create DS0/DS1 hardware drive select
-
-### User Preferences
-- Direct, no-nonsense communication
-- Focus on CODE only unless explicitly asked about documentation
-- When user says "fix it" - actually fix it, don't just claim to
-- Verify changes were actually applied
-- User will explicitly request README updates
-
-### Required Libraries
-- Adafruit SSD1306
-- Adafruit GFX Library
-- Standard Arduino SD library
-
-### Testing Checklist
-Before claiming code is ready:
-- [ ] Compiles without errors
-- [ ] No undefined variables
-- [ ] All pins are valid STM32F411 pins
-- [ ] diskImages[100] is declared
-- [ ] No floppy interface pins present
-- [ ] No DS0/DS1 pins present
 
 ## Development Notes
 
@@ -87,12 +55,6 @@ Before claiming code is ready:
 - OLED UI implemented
 - Rotary encoder working
 - NOT yet tested on real hardware
-
-### Known Limitations
-- Timing not accurate for real FDC operations
-- Write operations untested
-- No HFE format support yet
-- Drive switching is UI-only (no hardware select)
 
 ## When Starting New Conversation
 1. Always check out a fresh new copy from the repo
