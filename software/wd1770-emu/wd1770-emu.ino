@@ -2,6 +2,10 @@
    WD1770/1772 Drop-in Replacement with SD Card Support - IMPROVED VERSION
    For STM32F4 (e.g., STM32F407, STM32F411 "Black Pill")
 
+   LIBRARY REQUIREMENTS:
+   - U8g2 library (install via Arduino Library Manager)
+   - Display driver: SH1106 128x64
+   
    FIXES IMPLEMENTED:
    - Proper state machine for async operations
    - Non-blocking SD card I/O
@@ -9,6 +13,8 @@
    - Proper DRQ handshaking
    - Multi-sector command support
    - Bus timing improvements
+   - U8g2 display library for SH1106 OLED
+   - USB-safe pin assignments (RE=PB15, WE=PB4)
    
    Inspired by FlashFloppy - reads disk images from SD card
    Supports standard floppy disk image formats
@@ -17,42 +23,41 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <SD.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include <U8g2lib.h>
 
 // ===================== CONFIGURATION =====================
 
 // SD Card SPI pins
 #define SD_CS_PIN       PA4
-#define SD_MOSI_PIN     PA7
-#define SD_MISO_PIN     PA6
-#define SD_SCK_PIN      PA5
+// Only CS needs to be defined, all others are defaults
+//#define SD_MOSI_PIN     PA7
+//#define SD_MISO_PIN     PA6
+//#define SD_SCK_PIN      PA5
 
 // WD1770 CPU Interface Pins
-#define PIN_D0          PB0
-#define PIN_D1          PB1
-#define PIN_D2          PB2
-#define PIN_D3          PB3
-#define PIN_D4          PB4
-#define PIN_D5          PB5
-#define PIN_D6          PB6
-#define PIN_D7          PB7
+#define WD_D0          PB0
+#define WD_D1          PB1
+#define WD_D2          PB2
+#define WD_D3          PB3
+#define WD_D4          PB4
+#define WD_D5          PB5
+#define WD_D6          PB6
+#define WD_D7          PB7
 
-#define PIN_A0          PA8
-#define PIN_A1          PA9
-#define PIN_CS          PA10
-#define PIN_RE          PA11
-#define PIN_WE          PA12
+#define WD_A0          PA8
+#define WD_A1          PA9
+#define WD_CS          PA10
+#define WD_RE          PB15  // Moved from PA11 (USB) and PA13 (SWD!)
+#define WD_WE          PB10  // Moved from PA12 (USB) and PA14 (SWD!), freed since OLED moved to PC14
 
 // WD1770 Control Outputs
-#define PIN_INTRQ       PA15
-#define PIN_DRQ         PB8
+#define WD_INTRQ       PA15
+#define WD_DRQ         PB8
 
 // WD1770 Inputs from System
-#define PIN_DDEN        PB9
-#define PIN_DS0         PB12
-#define PIN_DS1         PB13
+#define WD_DDEN        PB9
+#define WD_DS0         PB12
+#define WD_DS1         PB13
 
 // User Interface pins
 #define PIN_LED         PC13
@@ -64,10 +69,9 @@
 #define DISPLAY_HEADER  "WD1770 Emu"  // Max 16 chars
 #define LASTIMG_CONFIG  "LASTIMG.CFG"  // Config file for last loaded images
 
-// I2C pins for OLED (Black Pill compatible)
-// Note: PB11 is NOT exposed on Black Pill board
-#define OLED_SDA        PB14  // I2C Data (software I2C)
-#define OLED_SCL        PB10  // I2C Clock (software I2C)
+// I2C pins for OLED - avoid PC14/PC15 (LSE oscillator pins!)
+#define OLED_SDA        PB14  // Free GPIO, not on any bus
+#define OLED_SCL        PA3   // Free GPIO, not on any bus
 #define SCREEN_WIDTH    128
 #define SCREEN_HEIGHT   64
 #define OLED_RESET      -1
@@ -196,16 +200,17 @@ FDCState fdc;
 DiskImage disks[MAX_DRIVES];
 // No longer keeping files open - open/read/write/close per operation for safety
 uint8_t activeDrive = 0;
-uint8_t dataPins[] = {PIN_D0, PIN_D1, PIN_D2, PIN_D3, PIN_D4, PIN_D5, PIN_D6, PIN_D7};
+uint8_t dataPins[] = {WD_D0, WD_D1, WD_D2, WD_D3, WD_D4, WD_D5, WD_D6, WD_D7};
 
-String diskImages[100];
+char diskImages[100][64];  // Plain char arrays - no constructors, safe on STM32
 int currentImageIndex[MAX_DRIVES] = {0, 0};
 int loadedImageIndex[MAX_DRIVES] = {-1, -1};  // Track which image is loaded (-1 = none)
 int totalImages = 0;
 bool oledPresent = false;
 uint8_t uiSelectedDrive = 0;
 
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+// U8g2 display - created in setup() to avoid global constructor HardFault on STM32
+U8G2_SH1106_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, OLED_SCL, OLED_SDA, U8X8_PIN_NONE);
 
 // Bus state tracking
 volatile bool lastCS = HIGH;
@@ -247,46 +252,48 @@ void releaseDataBus();
 
 void setup() {
   Serial.begin(115200);
+  delay(2000);
+  
   Serial.println("WD1770 SD Card Emulator - IMPROVED");
   Serial.println("Based on FlashFloppy concept");
 
-  initPins();
+  // U8g2 is a global object, no setup needed here
 
-  // Initialize I2C with explicit pins (Black Pill compatible)
-  Wire.setSDA(OLED_SDA);
-  Wire.setSCL(OLED_SCL);
-  Wire.begin();
-  Wire.setClock(400000);
+  // Init OLED first (matches working test pattern)
+  u8g2.begin();
+  u8g2.setContrast(128);
+  oledPresent = true;
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x10_tr);
+  u8g2.drawStr(0, 10, "WD1770 Emulator v2");
+  u8g2.drawStr(0, 22, "Initializing...");
+  u8g2.sendBuffer();
+  Serial.println("OLED display initialized");
+  delay(500);
 
-  if (display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-    oledPresent = true;
-    display.clearDisplay();
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(0, 0);
-    display.println("WD1770 Emulator v2");
-    display.println("Initializing...");
-    display.display();
-    Serial.println("OLED display initialized");
-  } else {
-    Serial.println("OLED display not found");
-    oledPresent = false;
-  }
-
-  if (!initSDCard()) {
+  // Init SD card
+  pinMode(SD_CS_PIN, OUTPUT);
+  digitalWrite(SD_CS_PIN, HIGH);
+  delay(10);
+  SPI.begin();
+  delay(250);
+  
+  Serial.println("Initializing SD card...");
+  if (!SD.begin(SD_CS_PIN)) {
     Serial.println("SD Card initialization failed!");
-    if (oledPresent) {
-      display.clearDisplay();
-      display.setCursor(0, 0);
-      display.println("ERROR:");
-      display.println("SD Card Failed!");
-      display.display();
-    }
+    u8g2.clearBuffer();
+    u8g2.drawStr(0, 10, "ERROR:");
+    u8g2.drawStr(0, 22, "SD Card Failed!");
+    u8g2.sendBuffer();
     while (1) {
       digitalWrite(PIN_LED, !digitalRead(PIN_LED));
       delay(100);
     }
   }
+  Serial.println("SD Card initialized");
+
+  // Init pins AFTER SD card
+  initPins();
 
   scanDiskImages();
 
@@ -312,12 +319,21 @@ void setup() {
 // ===================== MAIN LOOP =====================
 
 void loop() {
+  // UI always runs regardless of FDC enable state
+  checkImageSelection();
+
+  static unsigned long lastDisplayUpdate = 0;
+  if (millis() - lastDisplayUpdate > 100) {
+    updateDisplay();
+    lastDisplayUpdate = millis();
+  }
+
   // Check if FDC is enabled (DDEN active low)
-  if (digitalRead(PIN_DDEN) == HIGH) {
+  if (digitalRead(WD_DDEN) == HIGH) {
     // FDC disabled, tri-state outputs and reset state
     releaseDataBus();
-    digitalWrite(PIN_INTRQ, LOW);
-    digitalWrite(PIN_DRQ, LOW);
+    digitalWrite(WD_INTRQ, LOW);
+    digitalWrite(WD_DRQ, LOW);
     return;
   }
 
@@ -325,18 +341,18 @@ void loop() {
   checkDriveSelect();
 
   // Handle bus transactions with edge detection
-  bool currentCS = digitalRead(PIN_CS);
-  bool currentRE = digitalRead(PIN_RE);
-  bool currentWE = digitalRead(PIN_WE);
+  bool currentCS = digitalRead(WD_CS);
+  bool currentRE = digitalRead(WD_RE);
+  bool currentWE = digitalRead(WD_WE);
 
   // Chip select active
   if (currentCS == LOW) {
-    uint8_t addr = (digitalRead(PIN_A1) << 1) | digitalRead(PIN_A0);
+    uint8_t addr = (digitalRead(WD_A1) << 1) | digitalRead(WD_A0);
 
     // Read cycle: falling edge of RE
     if (currentRE == LOW && lastRE == HIGH) {
       handleRead(addr);
-      dataValidUntil = micros() + 500; // Keep data valid for 500µs
+      dataValidUntil = micros() + 500;
     }
     
     // Write cycle: falling edge of WE
@@ -344,7 +360,6 @@ void loop() {
       handleWrite(addr);
     }
   } else {
-    // CS released, release data bus
     if (dataBusDriven && micros() >= dataValidUntil) {
       releaseDataBus();
     }
@@ -354,21 +369,8 @@ void loop() {
   lastRE = currentRE;
   lastWE = currentWE;
 
-  // Process state machine (non-blocking)
   processStateMachine();
-  
-  // Update output signals
   updateOutputs();
-  
-  // Check for image selection changes
-  checkImageSelection();
-
-  // Update display periodically
-  static unsigned long lastDisplayUpdate = 0;
-  if (millis() - lastDisplayUpdate > 100) {
-    updateDisplay();
-    lastDisplayUpdate = millis();
-  }
 }
 
 // ===================== PIN INITIALIZATION =====================
@@ -378,26 +380,26 @@ void initPins() {
     pinMode(dataPins[i], INPUT);
   }
 
-  pinMode(PIN_A0, INPUT);
-  pinMode(PIN_A1, INPUT);
-  pinMode(PIN_CS, INPUT);
-  pinMode(PIN_RE, INPUT);
-  pinMode(PIN_WE, INPUT);
-  pinMode(PIN_DDEN, INPUT_PULLUP);
+  pinMode(WD_A0, INPUT);
+  pinMode(WD_A1, INPUT);
+  pinMode(WD_CS, INPUT);
+  pinMode(WD_RE, INPUT);
+  pinMode(WD_WE, INPUT);
+  pinMode(WD_DDEN, INPUT_PULLUP);
 
-  pinMode(PIN_DS0, INPUT_PULLUP);
-  pinMode(PIN_DS1, INPUT_PULLUP);
+  pinMode(WD_DS0, INPUT_PULLUP);
+  pinMode(WD_DS1, INPUT_PULLUP);
 
-  pinMode(PIN_INTRQ, OUTPUT);
-  pinMode(PIN_DRQ, OUTPUT);
+  pinMode(WD_INTRQ, OUTPUT);
+  pinMode(WD_DRQ, OUTPUT);
 
   pinMode(PIN_LED, OUTPUT);
   pinMode(ROTARY_CLK, INPUT_PULLUP);
   pinMode(ROTARY_DT, INPUT_PULLUP);
   pinMode(ROTARY_SW, INPUT_PULLUP);
 
-  digitalWrite(PIN_INTRQ, LOW);
-  digitalWrite(PIN_DRQ, LOW);
+  digitalWrite(WD_INTRQ, LOW);
+  digitalWrite(WD_DRQ, LOW);
 }
 
 // ===================== SD CARD FUNCTIONS =====================
@@ -406,7 +408,6 @@ bool initSDCard() {
   if (!SD.begin(SD_CS_PIN)) {
     return false;
   }
-
   Serial.println("SD Card initialized");
   return true;
 }
@@ -424,13 +425,19 @@ void scanDiskImages() {
     if (!entry) break;
 
     if (!entry.isDirectory()) {
-      String filename = entry.name();
-      filename.toUpperCase();
+      char filename[64];
+      strncpy(filename, entry.name(), 63);
+      filename[63] = '\0';
+      // Uppercase for comparison
+      char upper[64];
+      strncpy(upper, filename, 63);
+      for (int j = 0; upper[j]; j++) upper[j] = toupper(upper[j]);
 
-      if (filename.endsWith(".DSK") || filename.endsWith(".IMG") || 
-          filename.endsWith(".ST") || filename.endsWith(".HFE")) {
+      if (strstr(upper, ".DSK") || strstr(upper, ".IMG") ||
+          strstr(upper, ".ST")  || strstr(upper, ".HFE")) {
         if (totalImages < 100) {
-          diskImages[totalImages] = String(entry.name());
+          strncpy(diskImages[totalImages], filename, 63);
+          diskImages[totalImages][63] = '\0';
           Serial.print("Found: ");
           Serial.println(diskImages[totalImages]);
           totalImages++;
@@ -451,10 +458,10 @@ bool loadDiskImage(uint8_t drive, int imageIndex) {
     return false;
   }
 
-  String filename = "/" + diskImages[imageIndex];
+  char filename[70]; snprintf(filename, sizeof(filename), "/%s", diskImages[imageIndex]);
   
   // Open file temporarily to get metadata
-  File imageFile = SD.open(filename.c_str(), FILE_READ);
+  File imageFile = SD.open(filename, FILE_READ);
   if (!imageFile) {
     Serial.print("Failed to open: ");
     Serial.println(filename);
@@ -462,7 +469,7 @@ bool loadDiskImage(uint8_t drive, int imageIndex) {
   }
 
   DiskImage* disk = &disks[drive];
-  strncpy(disk->filename, diskImages[imageIndex].c_str(), 63);
+  strncpy(disk->filename, diskImages[imageIndex], 63);
   disk->filename[63] = '\0';
   disk->size = imageFile.size();
   imageFile.close();  // Close immediately after getting metadata
@@ -551,15 +558,17 @@ bool loadDiskImage(uint8_t drive, int imageIndex) {
   disk->trackHeaderSize = 0;
   loadedImageIndex[drive] = imageIndex;
   
-  // Check ALL .DSK files for Extended DSK header (not just certain sizes)
-  // Extended DSK can wrap any format: Timex, Amstrad, Spectrum, etc.
-  String fullFilename = "/" + diskImages[imageIndex];
-  String ext = fullFilename;
-  ext.toUpperCase();
+  // Check ALL .DSK files for Extended DSK header
+  char fullFilename[70];
+  snprintf(fullFilename, sizeof(fullFilename), "/%s", diskImages[imageIndex]);
   
-  if (ext.endsWith(".DSK") || ext.endsWith(".HFE")) {
-    // Try to parse as Extended DSK - this will read actual geometry from header
-    if (parseExtendedDSKHeader(drive, fullFilename)) {
+  // Check extension (case insensitive)
+  char extCheck[70];
+  strncpy(extCheck, fullFilename, 69);
+  for (int i = 0; extCheck[i]; i++) extCheck[i] = toupper(extCheck[i]);
+  
+  if (strstr(extCheck, ".DSK") || strstr(extCheck, ".HFE")) {
+    if (parseExtendedDSKHeader(drive, String(fullFilename))) {
       Serial.println("  Extended DSK header parsed successfully");
     }
   }
@@ -585,7 +594,7 @@ bool loadDiskImage(uint8_t drive, int imageIndex) {
 }
 
 bool parseExtendedDSKHeader(uint8_t drive, const String& filename) {
-  File imageFile = SD.open(filename.c_str(), FILE_READ);
+  File imageFile = SD.open(filename, FILE_READ);
   if (!imageFile) {
     return false;
   }
@@ -688,13 +697,20 @@ void loadLastImageConfig() {
     return;
   }
   
-  String line = configFile.readStringUntil('\n');
+  char line[16];
+  memset(line, 0, sizeof(line));
+  int i = 0;
+  while (configFile.available() && i < 15) {
+    char c = configFile.read();
+    if (c == '\n') break;
+    line[i++] = c;
+  }
   configFile.close();
   
-  int commaPos = line.indexOf(',');
-  if (commaPos > 0) {
-    int drive0 = line.substring(0, commaPos).toInt();
-    int drive1 = line.substring(commaPos + 1).toInt();
+  char* commaPtr = strchr(line, ',');
+  if (commaPtr) {
+    int drive0 = atoi(line);
+    int drive1 = atoi(commaPtr + 1);
     
     Serial.print("Loaded config: Drive 0=");
     Serial.print(drive0);
@@ -816,7 +832,7 @@ void executeCommand(uint8_t cmd) {
   fdc.command = cmd;
   fdc.busy = true;
   fdc.intrq = false;
-  fdc.doubleDensity = (digitalRead(PIN_DDEN) == LOW);
+  fdc.doubleDensity = (digitalRead(WD_DDEN) == LOW);
 
   uint8_t cmdType = cmd & 0xF0;
 
@@ -1076,8 +1092,8 @@ void startSectorRead() {
   }
 
   // Open, read, close immediately for safety
-  String filename = "/" + String(currentDisk->filename);
-  File imageFile = SD.open(filename.c_str(), FILE_READ);
+  char filename[70]; snprintf(filename, sizeof(filename), "/%s", currentDisk->filename);
+  File imageFile = SD.open(filename, FILE_READ);
   if (!imageFile) {
     Serial.println("Error: Could not open image file for reading");
     fdc.status = ST_RNF;
@@ -1150,8 +1166,8 @@ void completeSectorWrite() {
   }
 
   // Open, write, close immediately for safety
-  String filename = "/" + String(currentDisk->filename);
-  File imageFile = SD.open(filename.c_str(), FILE_WRITE);
+  char filename[70]; snprintf(filename, sizeof(filename), "/%s", currentDisk->filename);
+  File imageFile = SD.open(filename, FILE_WRITE);
   if (!imageFile) {
     Serial.println("Error: Could not open image file for writing");
     fdc.status = ST_WRITE_PROTECT;
@@ -1201,8 +1217,8 @@ void cmdReadTrack() {
   }
 
   // Open, read, close immediately for safety
-  String filename = "/" + String(currentDisk->filename);
-  File imageFile = SD.open(filename.c_str(), FILE_READ);
+  char filename[70]; snprintf(filename, sizeof(filename), "/%s", currentDisk->filename);
+  File imageFile = SD.open(filename, FILE_READ);
   if (!imageFile) {
     Serial.println("Error: Could not open image file for reading track");
     fdc.status = ST_RNF;
@@ -1250,15 +1266,15 @@ void cmdForceInterrupt(uint8_t cmd) {
 // ===================== OUTPUT MANAGEMENT =====================
 
 void updateOutputs() {
-  digitalWrite(PIN_INTRQ, fdc.intrq ? HIGH : LOW);
-  digitalWrite(PIN_DRQ, fdc.drq ? HIGH : LOW);
+  digitalWrite(WD_INTRQ, fdc.intrq ? HIGH : LOW);
+  digitalWrite(WD_DRQ, fdc.drq ? HIGH : LOW);
 }
 
 // ===================== DRIVE SELECT =====================
 
 void checkDriveSelect() {
-  bool ds0 = (digitalRead(PIN_DS0) == LOW);
-  bool ds1 = (digitalRead(PIN_DS1) == LOW);
+  bool ds0 = (digitalRead(WD_DS0) == LOW);
+  bool ds1 = (digitalRead(WD_DS1) == LOW);
 
   uint8_t newDrive = activeDrive;
 
@@ -1285,96 +1301,96 @@ void checkDriveSelect() {
 void updateDisplay() {
   if (!oledPresent) return;
 
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setCursor(0, 0);
+  char buf[32];
   
-  // Display customizable header (max 16 chars)
-  String header = DISPLAY_HEADER;
-  if (header.length() > 16) header = header.substring(0, 16);
-  display.print(header);
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x10_tr);
+  
+  // Display customizable header (max 16 chars, compile-time constant)
+  u8g2.drawStr(0, 8, DISPLAY_HEADER);
 
   // Activity indicator in top right
   if (fdc.busy) {
-    display.fillCircle(120, 3, 3, SSD1306_WHITE);
+    u8g2.drawDisc(120, 5, 3);
   }
 
-  display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+  u8g2.drawHLine(0, 10, 128);
 
   // Drive A label and filename
-  display.setCursor(0, 12);
-  if (activeDrive == 0) display.print("*");
-  else display.print(" ");
-  if (uiSelectedDrive == 0) display.print(">A:");
-  else display.print(" A:");
+  buf[0] = '\0';
+  if (activeDrive == 0) strcat(buf, "*");
+  else strcat(buf, " ");
+  if (uiSelectedDrive == 0) strcat(buf, ">A:");
+  else strcat(buf, " A:");
 
   if (disks[0].filename[0] != '\0') {
-    String fname = String(disks[0].filename);
-    if (fname.length() > 18) fname = fname.substring(0, 15) + "...";
-    display.print(fname);
+    char fname[20];
+    strncpy(fname, disks[0].filename, 18);
+    fname[18] = '\0';
+    if (strlen(disks[0].filename) > 18) strcpy(fname + 15, "...");
+    strcat(buf, fname);
   } else {
-    display.print("(empty)");
+    strcat(buf, "(empty)");
   }
+  u8g2.drawStr(0, 22, buf);
   
   // Track info for Drive A
-  display.setCursor(0, 22);
   if (disks[0].filename[0] != '\0') {
-    display.print(" T:");
     if (activeDrive == 0) {
-      display.print(fdc.currentTrack);
-      display.print("/");
-      display.print(disks[0].tracks - 1);
+      sprintf(buf, " T:%d/%d", fdc.currentTrack, disks[0].tracks - 1);
     } else {
-      display.print("--");
+      strcpy(buf, " T:--");
     }
+    u8g2.drawStr(0, 32, buf);
   }
 
   // Drive B label and filename
-  display.setCursor(0, 34);
-  if (activeDrive == 1) display.print("*");
-  else display.print(" ");
-  if (uiSelectedDrive == 1) display.print(">B:");
-  else display.print(" B:");
+  buf[0] = '\0';
+  if (activeDrive == 1) strcat(buf, "*");
+  else strcat(buf, " ");
+  if (uiSelectedDrive == 1) strcat(buf, ">B:");
+  else strcat(buf, " B:");
 
   if (disks[1].filename[0] != '\0') {
-    String fname = String(disks[1].filename);
-    if (fname.length() > 18) fname = fname.substring(0, 15) + "...";
-    display.print(fname);
+    char fname[20];
+    strncpy(fname, disks[1].filename, 18);
+    fname[18] = '\0';
+    if (strlen(disks[1].filename) > 18) strcpy(fname + 15, "...");
+    strcat(buf, fname);
   } else {
-    display.print("(empty)");
+    strcat(buf, "(empty)");
   }
+  u8g2.drawStr(0, 44, buf);
   
   // Track info for Drive B
-  display.setCursor(0, 44);
   if (disks[1].filename[0] != '\0') {
-    display.print(" T:");
     if (activeDrive == 1) {
-      display.print(fdc.currentTrack);
-      display.print("/");
-      display.print(disks[1].tracks - 1);
+      sprintf(buf, " T:%d/%d", fdc.currentTrack, disks[1].tracks - 1);
     } else {
-      display.print("--");
+      strcpy(buf, " T:--");
     }
+    u8g2.drawStr(0, 54, buf);
   }
 
   // Status line at bottom
-  display.drawLine(0, 54, 127, 54, SSD1306_WHITE);
-  display.setCursor(0, 56);
-  display.print("Img:");
-  display.print(totalImages);
+  u8g2.drawHLine(0, 56, 128);
+  sprintf(buf, "Img:%d", totalImages);
+  u8g2.drawStr(0, 64, buf);
   
-  display.display();
+  u8g2.sendBuffer();
 }
 
 void showImageSelectionMenu() {
   if (!oledPresent) return;
 
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.print("Select for Drive ");
-  display.print((char)('A' + uiSelectedDrive));
-  display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
+  char buf[32];
+  
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x10_tr);
+  
+  sprintf(buf, "Select for Drive %c", (char)('A' + uiSelectedDrive));
+  u8g2.drawStr(0, 8, buf);
+  u8g2.drawHLine(0, 10, 128);
 
   int startIdx = max(0, currentImageIndex[uiSelectedDrive] - 2);
   int endIdx = min(totalImages - 1, startIdx + 4);
@@ -1383,30 +1399,30 @@ void showImageSelectionMenu() {
     startIdx = max(0, endIdx - 4);
   }
 
-  int y = 14;
+  int y = 22;
   for (int i = startIdx; i <= endIdx && i < totalImages; i++) {
-    display.setCursor(0, y);
-
+    char fname[24];
+    strncpy(fname, diskImages[i], 20);
+    fname[20] = '\0';
+    if (strlen(diskImages[i]) > 20) { strcpy(fname + 17, "..."); }
+    
     if (i == currentImageIndex[uiSelectedDrive]) {
-      display.fillRect(0, y, 128, 10, SSD1306_WHITE);
-      display.setTextColor(SSD1306_BLACK);
-      display.print(">");
+      u8g2.setDrawColor(1);
+      u8g2.drawBox(0, y - 8, 128, 10);
+      u8g2.setDrawColor(0);
+      sprintf(buf, ">%s", fname);
+      u8g2.drawStr(0, y, buf);
+      u8g2.setDrawColor(1);
     } else {
-      display.setTextColor(SSD1306_WHITE);
-      display.print(" ");
+      sprintf(buf, " %s", fname);
+      u8g2.drawStr(0, y, buf);
     }
 
-    String fname = diskImages[i];
-    if (fname.length() > 20) fname = fname.substring(0, 17) + "...";
-    display.print(fname);
-
-    display.setTextColor(SSD1306_WHITE);
     y += 10;
   }
 
-  display.setCursor(0, 56);
-  display.print("Turn=Sel Press=Load");
-  display.display();
+  u8g2.drawStr(0, 64, "Turn=Sel Press=Load");
+  u8g2.sendBuffer();
 }
 
 // ===================== IMAGE SELECTION =====================
