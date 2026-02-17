@@ -209,6 +209,20 @@ int totalImages = 0;
 bool oledPresent = false;
 uint8_t uiSelectedDrive = 0;
 
+// UI modes for modal image selection
+typedef enum {
+  UI_MODE_NORMAL,
+  UI_MODE_SELECTING_DRIVE_A,
+  UI_MODE_SELECTING_DRIVE_B,
+  UI_MODE_CONFIRM
+} UIMode;
+
+UIMode uiMode = UI_MODE_NORMAL;
+int tempDrive0Index = 0;
+int tempDrive1Index = -1;  // -1 = NONE
+int tempScrollIndex = 0;    // Current scroll position in lists
+bool confirmYes = true;     // YES/NO toggle on confirm screen
+
 // U8g2 display - created in setup() to avoid global constructor HardFault on STM32
 U8G2_SH1106_128X64_NONAME_F_SW_I2C u8g2(U8G2_R0, OLED_SCL, OLED_SDA, U8X8_PIN_NONE);
 
@@ -243,6 +257,10 @@ void completeSectorWrite();
 void updateOutputs();
 void checkDriveSelect();
 void updateDisplay();
+void displayNormalMode();
+void displaySelectingDriveA();
+void displaySelectingDriveB();
+void displayConfirm();
 void checkImageSelection();
 uint8_t readDataBus();
 void setDataBus(uint8_t value);
@@ -326,6 +344,14 @@ void loop() {
   if (millis() - lastDisplayUpdate > 100) {
     updateDisplay();
     lastDisplayUpdate = millis();
+  }
+
+  // Suspend FDC emulation during image selection
+  if (uiMode != UI_MODE_NORMAL) {
+    releaseDataBus();
+    digitalWrite(WD_INTRQ, LOW);
+    digitalWrite(WD_DRQ, LOW);
+    return;
   }
 
   // Check if FDC is enabled (DDEN active low)
@@ -1301,27 +1327,43 @@ void checkDriveSelect() {
 void updateDisplay() {
   if (!oledPresent) return;
 
+  switch (uiMode) {
+    case UI_MODE_NORMAL:
+      displayNormalMode();
+      break;
+    case UI_MODE_SELECTING_DRIVE_A:
+      displaySelectingDriveA();
+      break;
+    case UI_MODE_SELECTING_DRIVE_B:
+      displaySelectingDriveB();
+      break;
+    case UI_MODE_CONFIRM:
+      displayConfirm();
+      break;
+  }
+}
+
+void displayNormalMode() {
   char buf[32];
   
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x10_tr);
   
-  // Display customizable header (max 16 chars, compile-time constant)
+  // Header
   u8g2.drawStr(0, 8, DISPLAY_HEADER);
 
-  // Activity indicator in top right
+  // Activity indicator
   if (fdc.busy) {
     u8g2.drawDisc(120, 5, 3);
   }
 
   u8g2.drawHLine(0, 10, 128);
 
-  // Drive A label and filename
+  // Drive A
   buf[0] = '\0';
   if (activeDrive == 0) strcat(buf, "*");
   else strcat(buf, " ");
-  if (uiSelectedDrive == 0) strcat(buf, ">A:");
-  else strcat(buf, " A:");
+  strcat(buf, " A:");
 
   if (disks[0].filename[0] != '\0') {
     char fname[20];
@@ -1344,12 +1386,11 @@ void updateDisplay() {
     u8g2.drawStr(0, 32, buf);
   }
 
-  // Drive B label and filename
+  // Drive B
   buf[0] = '\0';
   if (activeDrive == 1) strcat(buf, "*");
   else strcat(buf, " ");
-  if (uiSelectedDrive == 1) strcat(buf, ">B:");
-  else strcat(buf, " B:");
+  strcat(buf, " B:");
 
   if (disks[1].filename[0] != '\0') {
     char fname[20];
@@ -1372,29 +1413,26 @@ void updateDisplay() {
     u8g2.drawStr(0, 54, buf);
   }
 
-  // Status line at bottom
+  // Status line
   u8g2.drawHLine(0, 56, 128);
-  sprintf(buf, "Img:%d", totalImages);
-  u8g2.drawStr(0, 64, buf);
+  u8g2.drawStr(0, 64, "Press to select");
   
   u8g2.sendBuffer();
 }
 
-void showImageSelectionMenu() {
-  if (!oledPresent) return;
-
+void displaySelectingDriveA() {
   char buf[32];
   
   u8g2.clearBuffer();
   u8g2.setFont(u8g2_font_6x10_tr);
   
-  sprintf(buf, "Select for Drive %c", (char)('A' + uiSelectedDrive));
-  u8g2.drawStr(0, 8, buf);
+  u8g2.drawStr(0, 8, "Select Drive A:");
   u8g2.drawHLine(0, 10, 128);
 
-  int startIdx = max(0, currentImageIndex[uiSelectedDrive] - 2);
+  // Show scrollable list
+  int startIdx = max(0, tempScrollIndex - 2);
   int endIdx = min(totalImages - 1, startIdx + 4);
-
+  
   if (endIdx - startIdx < 4 && startIdx > 0) {
     startIdx = max(0, endIdx - 4);
   }
@@ -1404,9 +1442,9 @@ void showImageSelectionMenu() {
     char fname[24];
     strncpy(fname, diskImages[i], 20);
     fname[20] = '\0';
-    if (strlen(diskImages[i]) > 20) { strcpy(fname + 17, "..."); }
+    if (strlen(diskImages[i]) > 20) strcpy(fname + 17, "...");
     
-    if (i == currentImageIndex[uiSelectedDrive]) {
+    if (i == tempScrollIndex) {
       u8g2.setDrawColor(1);
       u8g2.drawBox(0, y - 8, 128, 10);
       u8g2.setDrawColor(0);
@@ -1417,79 +1455,188 @@ void showImageSelectionMenu() {
       sprintf(buf, " %s", fname);
       u8g2.drawStr(0, y, buf);
     }
-
     y += 10;
   }
 
-  u8g2.drawStr(0, 64, "Turn=Sel Press=Load");
+  u8g2.drawStr(0, 64, "Turn=Scroll Press=OK");
+  u8g2.sendBuffer();
+}
+
+void displaySelectingDriveB() {
+  char buf[32];
+  
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x10_tr);
+  
+  u8g2.drawStr(0, 8, "Select Drive B:");
+  u8g2.drawHLine(0, 10, 128);
+
+  // Build list: NONE + all images
+  int startIdx, endIdx;
+  
+  if (tempScrollIndex == -1) {
+    // NONE is selected, show it at top
+    startIdx = -1;
+    endIdx = min(totalImages - 1, 3);
+  } else {
+    // Image selected
+    startIdx = max(-1, tempScrollIndex - 2);
+    endIdx = min(totalImages - 1, startIdx + 4);
+    if (endIdx - startIdx < 4 && startIdx > -1) {
+      startIdx = max(-1, endIdx - 4);
+    }
+  }
+
+  int y = 22;
+  for (int i = startIdx; i <= endIdx && i < totalImages; i++) {
+    if (i == -1) {
+      // NONE option
+      if (tempScrollIndex == -1) {
+        u8g2.setDrawColor(1);
+        u8g2.drawBox(0, y - 8, 128, 10);
+        u8g2.setDrawColor(0);
+        u8g2.drawStr(0, y, ">NONE");
+        u8g2.setDrawColor(1);
+      } else {
+        u8g2.drawStr(0, y, " NONE");
+      }
+    } else {
+      // Image option
+      char fname[24];
+      strncpy(fname, diskImages[i], 20);
+      fname[20] = '\0';
+      if (strlen(diskImages[i]) > 20) strcpy(fname + 17, "...");
+      
+      if (i == tempScrollIndex) {
+        u8g2.setDrawColor(1);
+        u8g2.drawBox(0, y - 8, 128, 10);
+        u8g2.setDrawColor(0);
+        sprintf(buf, ">%s", fname);
+        u8g2.drawStr(0, y, buf);
+        u8g2.setDrawColor(1);
+      } else {
+        sprintf(buf, " %s", fname);
+        u8g2.drawStr(0, y, buf);
+      }
+    }
+    y += 10;
+  }
+
+  u8g2.drawStr(0, 64, "Turn=Scroll Press=OK");
+  u8g2.sendBuffer();
+}
+
+void displayConfirm() {
+  char buf[32];
+  
+  u8g2.clearBuffer();
+  u8g2.setFont(u8g2_font_6x10_tr);
+  
+  u8g2.drawStr(0, 8, "Load these?");
+  u8g2.drawHLine(0, 10, 128);
+
+  // Show Drive A selection
+  u8g2.drawStr(0, 22, "A:");
+  char fname[20];
+  strncpy(fname, diskImages[tempDrive0Index], 18);
+  fname[18] = '\0';
+  if (strlen(diskImages[tempDrive0Index]) > 18) strcpy(fname + 15, "...");
+  u8g2.drawStr(12, 22, fname);
+
+  // Show Drive B selection
+  u8g2.drawStr(0, 32, "B:");
+  if (tempDrive1Index >= 0) {
+    strncpy(fname, diskImages[tempDrive1Index], 18);
+    fname[18] = '\0';
+    if (strlen(diskImages[tempDrive1Index]) > 18) strcpy(fname + 15, "...");
+    u8g2.drawStr(12, 32, fname);
+  } else {
+    u8g2.drawStr(12, 32, "(none)");
+  }
+
+  u8g2.drawHLine(0, 38, 128);
+
+  // YES/NO toggle
+  if (confirmYes) {
+    u8g2.setDrawColor(1);
+    u8g2.drawBox(30, 42, 30, 12);
+    u8g2.setDrawColor(0);
+    u8g2.drawStr(35, 50, "[YES]");
+    u8g2.setDrawColor(1);
+    u8g2.drawStr(75, 50, " NO ");
+  } else {
+    u8g2.drawStr(35, 50, " YES ");
+    u8g2.setDrawColor(1);
+    u8g2.drawBox(70, 42, 30, 12);
+    u8g2.setDrawColor(0);
+    u8g2.drawStr(75, 50, "[NO]");
+    u8g2.setDrawColor(1);
+  }
+
+  u8g2.drawStr(0, 64, "Turn=Toggle Press=OK");
   u8g2.sendBuffer();
 }
 
 // ===================== IMAGE SELECTION =====================
 
 void checkImageSelection() {
-  // State machine for encoder debouncing
   static uint8_t lastEncoderState = 0;
   static unsigned long lastEncoderChange = 0;
-  static unsigned long lastDebounce = 0;
   static unsigned long buttonPressTime = 0;
   static bool buttonPressed = false;
-  static bool inSelectionMode = false;
   
-  // Encoder debouncing constants
-  const unsigned long ENCODER_DEBOUNCE_MS = 20;  // 20ms debounce for rotation
-  const unsigned long BUTTON_DEBOUNCE_MS = 50;   // 50ms debounce for button
+  const unsigned long ENCODER_DEBOUNCE_MS = 20;
+  const unsigned long BUTTON_DEBOUNCE_MS = 50;
   
-  // Read current encoder state
+  // Read encoder
   int clkCurrent = digitalRead(ROTARY_CLK);
   int dtCurrent = digitalRead(ROTARY_DT);
   uint8_t currentState = (clkCurrent << 1) | dtCurrent;
   
-  // Encoder rotation handling with debouncing
+  // Handle rotation
   if (currentState != lastEncoderState) {
     unsigned long now = millis();
     
-    // Only process if enough time has passed (debounce)
     if (now - lastEncoderChange > ENCODER_DEBOUNCE_MS) {
-      // Determine direction based on state change
-      // Standard quadrature encoding:
-      // CW:  00->10->11->01->00  (CLK leads DT)
-      // CCW: 00->01->11->10->00  (DT leads CLK)
+      bool clockwise = (lastEncoderState == 0b00 && currentState == 0b10);
+      bool counterClockwise = (lastEncoderState == 0b00 && currentState == 0b01);
       
-      if (lastEncoderState == 0b00 && currentState == 0b10) {
-        // Started clockwise rotation
-        currentImageIndex[uiSelectedDrive]++;
-        if (currentImageIndex[uiSelectedDrive] >= totalImages) {
-          currentImageIndex[uiSelectedDrive] = 0;
+      if (clockwise || counterClockwise) {
+        int delta = clockwise ? 1 : -1;
+        
+        switch (uiMode) {
+          case UI_MODE_NORMAL:
+            // Rotation does nothing in normal mode
+            break;
+            
+          case UI_MODE_SELECTING_DRIVE_A:
+            tempScrollIndex += delta;
+            if (tempScrollIndex < 0) tempScrollIndex = totalImages - 1;
+            if (tempScrollIndex >= totalImages) tempScrollIndex = 0;
+            updateDisplay();
+            break;
+            
+          case UI_MODE_SELECTING_DRIVE_B:
+            tempScrollIndex += delta;
+            // NONE is index -1, then 0..totalImages-1
+            if (tempScrollIndex < -1) tempScrollIndex = totalImages - 1;
+            if (tempScrollIndex >= totalImages) tempScrollIndex = -1;
+            updateDisplay();
+            break;
+            
+          case UI_MODE_CONFIRM:
+            confirmYes = !confirmYes;
+            updateDisplay();
+            break;
         }
-        inSelectionMode = true;
-        showImageSelectionMenu();
-        lastDebounce = now;
-      }
-      else if (lastEncoderState == 0b00 && currentState == 0b01) {
-        // Started counter-clockwise rotation
-        currentImageIndex[uiSelectedDrive]--;
-        if (currentImageIndex[uiSelectedDrive] < 0) {
-          currentImageIndex[uiSelectedDrive] = totalImages - 1;
-        }
-        inSelectionMode = true;
-        showImageSelectionMenu();
-        lastDebounce = now;
       }
       
       lastEncoderChange = now;
     }
-    
     lastEncoderState = currentState;
   }
   
-  // Exit selection mode after 3 seconds of inactivity
-  if (inSelectionMode && (millis() - lastDebounce > 3000)) {
-    inSelectionMode = false;
-    updateDisplay();
-  }
-  
-  // Button handling with debouncing
+  // Handle button press
   int sw = digitalRead(ROTARY_SW);
   
   if (sw == LOW && !buttonPressed) {
@@ -1500,22 +1647,53 @@ void checkImageSelection() {
   if (sw == HIGH && buttonPressed) {
     unsigned long pressDuration = millis() - buttonPressTime;
     
-    // Debounce: only accept presses longer than BUTTON_DEBOUNCE_MS
     if (pressDuration >= BUTTON_DEBOUNCE_MS) {
-      if (pressDuration >= 1000) {
-        // Long press: switch between drives
-        uiSelectedDrive = 1 - uiSelectedDrive;
-        updateDisplay();
-      } else {
-        // Short press: load selected image
-        loadDiskImage(uiSelectedDrive, currentImageIndex[uiSelectedDrive]);
-        inSelectionMode = false;
-        updateDisplay();
+      // Button released - handle state transitions
+      switch (uiMode) {
+        case UI_MODE_NORMAL:
+          // Enter selection mode
+          uiMode = UI_MODE_SELECTING_DRIVE_A;
+          tempScrollIndex = (loadedImageIndex[0] >= 0) ? loadedImageIndex[0] : 0;
+          updateDisplay();
+          break;
+          
+        case UI_MODE_SELECTING_DRIVE_A:
+          // Confirm Drive A selection
+          tempDrive0Index = tempScrollIndex;
+          uiMode = UI_MODE_SELECTING_DRIVE_B;
+          tempScrollIndex = (loadedImageIndex[1] >= 0) ? loadedImageIndex[1] : -1;
+          updateDisplay();
+          break;
+          
+        case UI_MODE_SELECTING_DRIVE_B:
+          // Confirm Drive B selection
+          tempDrive1Index = tempScrollIndex;
+          uiMode = UI_MODE_CONFIRM;
+          confirmYes = true;
+          updateDisplay();
+          break;
+          
+        case UI_MODE_CONFIRM:
+          if (confirmYes) {
+            // Load images
+            loadDiskImage(0, tempDrive0Index);
+            if (tempDrive1Index >= 0) {
+              loadDiskImage(1, tempDrive1Index);
+            }
+            saveLastImageConfig();
+            uiMode = UI_MODE_NORMAL;
+            updateDisplay();
+          } else {
+            // Go back to Drive A selection
+            uiMode = UI_MODE_SELECTING_DRIVE_A;
+            tempScrollIndex = tempDrive0Index;
+            updateDisplay();
+          }
+          break;
       }
     }
     
     buttonPressed = false;
-    buttonPressTime = 0;
   }
 }
 
