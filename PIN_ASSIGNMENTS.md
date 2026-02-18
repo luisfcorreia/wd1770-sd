@@ -172,9 +172,7 @@ Real WD1770 chip pin 2 is R/W (not separate RE/WE):
 **All pins operate at 3.3V logic levels.**
 
 If connecting to 5V systems:
-- Use bidirectional level shifters on data bus
-- Use level shifters on all control signals
-- Recommended: TXB0108 (8-bit bidirectional)
+- do nothing, STM32 is 5V tolerant
 
 ---
 
