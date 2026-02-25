@@ -46,18 +46,20 @@ OledUI ui;
 // ===================== INITIALIZATION =====================
 
 void setup() {
+  #if DEBUG_SERIAL
   Serial.begin(115200);
+#endif
   delay(2000);
   
-  Serial.println("WD1770 SD Card Emulator");
-  Serial.println("Modular Architecture");
+  DBGLN("WD1770 SD Card Emulator");
+  DBGLN("Modular Architecture");
   
   // Initialize pins first
   initPins();
   
   // Initialize SD card
   if (!initSDCard()) {
-    Serial.println("FATAL: SD Card initialization failed!");
+    DBGLN("FATAL: SD Card initialization failed!");
     while (1) {
       digitalWrite(PIN_LED, !digitalRead(PIN_LED));
       delay(100);
@@ -66,7 +68,7 @@ void setup() {
   
   // Initialize UI (OLED)
   if (!ui.begin()) {
-    Serial.println("Warning: OLED initialization failed");
+    DBGLN("Warning: OLED initialization failed");
   }
   
   // Initialize disk manager
@@ -78,7 +80,7 @@ void setup() {
   
   // If no images loaded, load defaults
   if (diskManager.getLoadedIndex(0) == -1 && diskManager.getTotalImages() > 0) {
-    Serial.println("First boot - loading default images");
+    DBGLN("First boot - loading default images");
     diskManager.loadImage(0, 0);
     if (diskManager.getTotalImages() > 1) {
       diskManager.loadImage(1, 1);
@@ -98,8 +100,8 @@ void setup() {
   // Initial display update
   ui.updateDisplay();
   
-  Serial.println("Ready!");
-  Serial.println("Safe to reset/power off anytime EXCEPT during 'Saving config...' message");
+  DBGLN("Ready!");
+  DBGLN("Safe to reset/power off anytime EXCEPT during 'Saving config...' message");
 }
 
 // ===================== MAIN LOOP =====================
@@ -183,13 +185,13 @@ bool initSDCard() {
   SPI.begin();
   delay(250);
   
-  Serial.println("Initializing SD card...");
+  DBGLN("Initializing SD card...");
   
   if (!SD.begin(SD_CS_PIN, SD_SCK_MHZ(16))) {
-    Serial.println("SD Card initialization failed!");
+    DBGLN("SD Card initialization failed!");
     return false;
   }
   
-  Serial.println("SD Card initialized (LFN support enabled)");
+  DBGLN("SD Card initialized (LFN support enabled)");
   return true;
 }

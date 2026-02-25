@@ -2,6 +2,7 @@
 
 #include <SdFat.h>
 #include "DiskImage.h"
+#include "Hardware.h"
 
 #define MAX_DISK_IMAGES 100
 #define MAX_DRIVES 2

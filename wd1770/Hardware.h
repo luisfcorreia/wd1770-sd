@@ -1,42 +1,37 @@
 #pragma once
 
+// Set to 1 to enable serial debug output, 0 to suppress entirely
+#define DEBUG_SERIAL 1
+
+#if DEBUG_SERIAL
+  #define DBG(...)   Serial.print(__VA_ARGS__)
+  #define DBGLN(...) Serial.println(__VA_ARGS__)
+#else
+  #define DBG(...)
+  #define DBGLN(...)
+#endif
+
 // SD Card SPI pins
 #define SD_CS_PIN       PA4
 
 // WD1770 Data Bus (must be PB0-PB7 consecutive)
-int WD_D0 = PB0;
-int WD_D1 = PB1;
-int WD_D2 = PB2;
-int WD_D3 = PB3;
-int WD_D4 = PB4;
-int WD_D5 = PB5;
-int WD_D6 = PB6;
-int WD_D7 = PB7;
+extern int WD_D0, WD_D1, WD_D2, WD_D3, WD_D4, WD_D5, WD_D6, WD_D7;
 
 // WD1770 Control Signals
-int WD_A0 = PA8;
-int WD_A1 = PA9;
-int WD_CS = PA10;
-int WD_RW = PB15;
+extern int WD_A0, WD_A1, WD_CS, WD_RW;
 
 // WD1770 Output Signals
-int WD_INTRQ = PA15;
-int WD_DRQ = PB8;
+extern int WD_INTRQ, WD_DRQ;
 
 // WD1770 Input Signals
-int WD_DDEN = PB9;
-int WD_DS0 = PB12;
-int WD_DS1 = PB13;
+extern int WD_DDEN, WD_DS0, WD_DS1;
 
 // User Interface pins - 3 buttons
 #define PIN_LED         PC13
-int BTN_UP = PA0;
-int BTN_DOWN = PA1;
-int BTN_SELECT = PA2;
+extern int BTN_UP, BTN_DOWN, BTN_SELECT;
 
 // OLED Display pins (Software I2C, SH1106 driver)
-int OLED_SDA = PB14;
-int OLED_SCL = PA3;
+extern int OLED_SDA, OLED_SCL;
 
 // Data bus pin array for efficient access
-uint8_t dataPins[] = {WD_D0, WD_D1, WD_D2, WD_D3, WD_D4, WD_D5, WD_D6, WD_D7};
+extern uint8_t dataPins[8];

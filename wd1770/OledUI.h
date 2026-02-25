@@ -3,6 +3,7 @@
 #include <U8g2lib.h>
 #include "DiskImage.h"
 #include "DiskManager.h"
+#include "Hardware.h"
 #include "FdcDevice.h"
 
 // UI Mode enumeration
@@ -10,17 +11,11 @@ typedef enum {
   UI_MODE_NORMAL,
   UI_MODE_SELECTING_DRIVE_A,
   UI_MODE_SELECTING_DRIVE_B,
-  UI_MODE_CONFIRM
+  UI_MODE_CONFIRM,
+  UI_MODE_SCREENSAVER
 } UIMode;
 
-// Button pins - declared as extern since defined in main
-extern int BTN_UP;
-extern int BTN_DOWN;
-extern int BTN_SELECT;
-
-// OLED pins - declared as extern
-extern int OLED_SDA;
-extern int OLED_SCL;
+// OLED pins - declared in Hardware.h
 
 class OledUI {
 public:
@@ -59,6 +54,7 @@ private:
   unsigned long lastSelectPress;
   bool selectPressed;
   unsigned long lastDisplayUpdate;
+  unsigned long lastActivityTime;
   
   // Display modes
   void displayNormalMode();

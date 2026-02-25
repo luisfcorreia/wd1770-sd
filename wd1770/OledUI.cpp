@@ -21,6 +21,7 @@ OledUI::OledUI() : u8g2(U8G2_R0, OLED_SCL, OLED_SDA, U8X8_PIN_NONE) {
   lastSelectPress = 0;
   selectPressed = false;
   lastDisplayUpdate = 0;
+  lastActivityTime = 0;
 }
 
 bool OledUI::begin() {
@@ -44,11 +45,22 @@ void OledUI::setFdcDevice(FdcDevice* fdc) {
 
 void OledUI::checkInput() {
   unsigned long now = millis();
-  
+
+  // Any button press wakes screensaver
+  if (uiMode == UI_MODE_SCREENSAVER) {
+    if (digitalRead(BTN_UP) == LOW || digitalRead(BTN_DOWN) == LOW || digitalRead(BTN_SELECT) == LOW) {
+      lastActivityTime = now;
+      uiMode = UI_MODE_NORMAL;
+      updateDisplay();
+    }
+    return;
+  }
+
   // Handle UP button
   if (digitalRead(BTN_UP) == LOW) {
     if (now - lastUpPress > BUTTON_DEBOUNCE_MS) {
       lastUpPress = now;
+      lastActivityTime = now;
       handleUpButton();
     }
   }
@@ -57,6 +69,7 @@ void OledUI::checkInput() {
   if (digitalRead(BTN_DOWN) == LOW) {
     if (now - lastDownPress > BUTTON_DEBOUNCE_MS) {
       lastDownPress = now;
+      lastActivityTime = now;
       handleDownButton();
     }
   }
@@ -73,6 +86,7 @@ void OledUI::checkInput() {
     unsigned long pressDuration = now - lastSelectPress;
     
     if (pressDuration >= BUTTON_DEBOUNCE_MS) {
+      lastActivityTime = now;
       handleSelectButton();
     }
     
@@ -90,23 +104,23 @@ void OledUI::handleUpButton() {
     case UI_MODE_SELECTING_DRIVE_A:
       tempScrollIndex--;
       if (tempScrollIndex < 0) tempScrollIndex = diskManager->getTotalImages() - 1;
-      Serial.print("Drive A scroll: ");
-      Serial.print(tempScrollIndex);
-      Serial.print(" = ");
-      Serial.println(diskManager->getImageName(tempScrollIndex));
+      DBG("Drive A scroll: ");
+      DBG(tempScrollIndex);
+      DBG(" = ");
+      DBGLN(diskManager->getImageName(tempScrollIndex));
       updateDisplay();
       break;
       
     case UI_MODE_SELECTING_DRIVE_B:
       tempScrollIndex--;
       if (tempScrollIndex < -1) tempScrollIndex = diskManager->getTotalImages() - 1;
-      Serial.print("Drive B scroll: ");
-      Serial.print(tempScrollIndex);
+      DBG("Drive B scroll: ");
+      DBG(tempScrollIndex);
       if (tempScrollIndex >= 0) {
-        Serial.print(" = ");
-        Serial.println(diskManager->getImageName(tempScrollIndex));
+        DBG(" = ");
+        DBGLN(diskManager->getImageName(tempScrollIndex));
       } else {
-        Serial.println(" = NONE");
+        DBGLN(" = NONE");
       }
       updateDisplay();
       break;
@@ -128,23 +142,23 @@ void OledUI::handleDownButton() {
     case UI_MODE_SELECTING_DRIVE_A:
       tempScrollIndex++;
       if (tempScrollIndex >= diskManager->getTotalImages()) tempScrollIndex = 0;
-      Serial.print("Drive A scroll: ");
-      Serial.print(tempScrollIndex);
-      Serial.print(" = ");
-      Serial.println(diskManager->getImageName(tempScrollIndex));
+      DBG("Drive A scroll: ");
+      DBG(tempScrollIndex);
+      DBG(" = ");
+      DBGLN(diskManager->getImageName(tempScrollIndex));
       updateDisplay();
       break;
       
     case UI_MODE_SELECTING_DRIVE_B:
       tempScrollIndex++;
       if (tempScrollIndex >= diskManager->getTotalImages()) tempScrollIndex = -1;
-      Serial.print("Drive B scroll: ");
-      Serial.print(tempScrollIndex);
+      DBG("Drive B scroll: ");
+      DBG(tempScrollIndex);
       if (tempScrollIndex >= 0) {
-        Serial.print(" = ");
-        Serial.println(diskManager->getImageName(tempScrollIndex));
+        DBG(" = ");
+        DBGLN(diskManager->getImageName(tempScrollIndex));
       } else {
-        Serial.println(" = NONE");
+        DBGLN(" = NONE");
       }
       updateDisplay();
       break;
@@ -169,10 +183,10 @@ void OledUI::handleSelectButton() {
       
     case UI_MODE_SELECTING_DRIVE_A:
       tempDrive0Index = tempScrollIndex;
-      Serial.print("Drive A selected: index ");
-      Serial.print(tempDrive0Index);
-      Serial.print(" = ");
-      Serial.println(diskManager->getImageName(tempDrive0Index));
+      DBG("Drive A selected: index ");
+      DBG(tempDrive0Index);
+      DBG(" = ");
+      DBGLN(diskManager->getImageName(tempDrive0Index));
       uiMode = UI_MODE_SELECTING_DRIVE_B;
       tempScrollIndex = (diskManager->getLoadedIndex(1) >= 0) ? 
                         diskManager->getLoadedIndex(1) : -1;
@@ -181,13 +195,13 @@ void OledUI::handleSelectButton() {
       
     case UI_MODE_SELECTING_DRIVE_B:
       tempDrive1Index = tempScrollIndex;
-      Serial.print("Drive B selected: index ");
-      Serial.print(tempDrive1Index);
+      DBG("Drive B selected: index ");
+      DBG(tempDrive1Index);
       if (tempDrive1Index >= 0) {
-        Serial.print(" = ");
-        Serial.println(diskManager->getImageName(tempDrive1Index));
+        DBG(" = ");
+        DBGLN(diskManager->getImageName(tempDrive1Index));
       } else {
-        Serial.println(" = NONE");
+        DBGLN(" = NONE");
       }
       uiMode = UI_MODE_CONFIRM;
       confirmYes = true;
@@ -213,21 +227,21 @@ void OledUI::loadSelectedImages() {
   showMessage("Loading images...");
   
   // Load Drive A
-  Serial.print("Loading Drive A: index ");
-  Serial.print(tempDrive0Index);
-  Serial.print(" = ");
-  Serial.println(diskManager->getImageName(tempDrive0Index));
+  DBG("Loading Drive A: index ");
+  DBG(tempDrive0Index);
+  DBG(" = ");
+  DBGLN(diskManager->getImageName(tempDrive0Index));
   diskManager->loadImage(0, tempDrive0Index);
   
   // Load or eject Drive B
   if (tempDrive1Index >= 0) {
-    Serial.print("Loading Drive B: index ");
-    Serial.print(tempDrive1Index);
-    Serial.print(" = ");
-    Serial.println(diskManager->getImageName(tempDrive1Index));
+    DBG("Loading Drive B: index ");
+    DBG(tempDrive1Index);
+    DBG(" = ");
+    DBGLN(diskManager->getImageName(tempDrive1Index));
     diskManager->loadImage(1, tempDrive1Index);
   } else {
-    Serial.println("Loading Drive B: NONE (ejecting)");
+    DBGLN("Loading Drive B: NONE (ejecting)");
     diskManager->ejectDrive(1);
   }
   
@@ -271,6 +285,12 @@ void OledUI::updateDisplay() {
 
 void OledUI::periodicUpdate() {
   unsigned long now = millis();
+  if (uiMode == UI_MODE_NORMAL && now - lastActivityTime > 30000UL) {
+    uiMode = UI_MODE_SCREENSAVER;
+    u8g2.clearBuffer();
+    u8g2.sendBuffer();
+    return;
+  }
   if (uiMode == UI_MODE_NORMAL && now - lastDisplayUpdate > DISPLAY_UPDATE_INTERVAL) {
     displayNormalMode();
     lastDisplayUpdate = now;

@@ -24,7 +24,7 @@ DiskManager::DiskManager() {
 bool DiskManager::begin(SdFat32* sdCard) {
   sd = sdCard;
   if (!sd) {
-    Serial.println("DiskManager: Invalid SD card pointer");
+    DBGLN("DiskManager: Invalid SD card pointer");
     return false;
   }
   return true;
@@ -33,7 +33,7 @@ bool DiskManager::begin(SdFat32* sdCard) {
 void DiskManager::scanImages() {
   File32 root = sd->open("/");
   if (!root) {
-    Serial.println("Failed to open root directory");
+    DBGLN("Failed to open root directory");
     return;
   }
 
@@ -56,8 +56,8 @@ void DiskManager::scanImages() {
         if (totalImages < MAX_DISK_IMAGES) {
           strncpy(diskImages[totalImages], filename, 63);
           diskImages[totalImages][63] = '\0';
-          Serial.print("Found: ");
-          Serial.println(diskImages[totalImages]);
+          DBG("Found: ");
+          DBGLN(diskImages[totalImages]);
           totalImages++;
         }
       }
@@ -66,9 +66,9 @@ void DiskManager::scanImages() {
   }
   root.close();
 
-  Serial.print("Found ");
-  Serial.print(totalImages);
-  Serial.println(" disk images");
+  DBG("Found ");
+  DBG(totalImages);
+  DBGLN(" disk images");
 }
 
 const char* DiskManager::getImageName(int index) const {
@@ -89,8 +89,8 @@ bool DiskManager::loadImage(uint8_t drive, int imageIndex) {
   // Open file temporarily to get metadata
   File32 imageFile = sd->open(filename, O_READ);
   if (!imageFile) {
-    Serial.print("Failed to open: ");
-    Serial.println(filename);
+    DBG("Failed to open: ");
+    DBGLN(filename);
     return false;
   }
 
@@ -102,7 +102,7 @@ bool DiskManager::loadImage(uint8_t drive, int imageIndex) {
 
   // Detect format by size
   if (!detectFormat(disk, disk->size)) {
-    Serial.println("  Warning: Unknown disk format");
+    DBGLN("  Warning: Unknown disk format");
   }
 
   disk->writeProtected = false;
@@ -118,23 +118,23 @@ bool DiskManager::loadImage(uint8_t drive, int imageIndex) {
   
   if (strstr(extCheck, ".DSK") || strstr(extCheck, ".HFE")) {
     if (parseExtendedDSK(drive, filename)) {
-      Serial.println("  Extended DSK header parsed successfully");
+      DBGLN("  Extended DSK header parsed successfully");
     }
   }
 
-  Serial.print("Drive ");
-  Serial.print(drive);
-  Serial.print(": Loaded ");
-  Serial.print(disk->filename);
-  Serial.print(" (");
-  Serial.print(disk->size);
-  Serial.print(" bytes, ");
-  Serial.print(disk->tracks);
-  Serial.print("T/");
-  Serial.print(disk->sectorsPerTrack);
-  Serial.print("S/");
-  Serial.print(disk->sectorSize);
-  Serial.println("B)");
+  DBG("Drive ");
+  DBG(drive);
+  DBG(": Loaded ");
+  DBG(disk->filename);
+  DBG(" (");
+  DBG(disk->size);
+  DBG(" bytes, ");
+  DBG(disk->tracks);
+  DBG("T/");
+  DBG(disk->sectorsPerTrack);
+  DBG("S/");
+  DBG(disk->sectorSize);
+  DBGLN("B)");
 
   return true;
 }
@@ -146,9 +146,9 @@ void DiskManager::ejectDrive(uint8_t drive) {
   disks[drive].size = 0;
   loadedImageIndex[drive] = -1;
   
-  Serial.print("Drive ");
-  Serial.print(drive);
-  Serial.println(" ejected");
+  DBG("Drive ");
+  DBG(drive);
+  DBGLN(" ejected");
 }
 
 bool DiskManager::detectFormat(DiskImage* disk, uint32_t fileSize) {
@@ -158,7 +158,7 @@ bool DiskManager::detectFormat(DiskImage* disk, uint32_t fileSize) {
     disk->sectorsPerTrack = 16;
     disk->sectorSize = 256;
     disk->doubleDensity = false;
-    Serial.println("  Format: Timex FDD 3000 (40T/16S/256B)");
+    DBGLN("  Format: Timex FDD 3000 (40T/16S/256B)");
     return true;
   }
   
@@ -167,7 +167,7 @@ bool DiskManager::detectFormat(DiskImage* disk, uint32_t fileSize) {
     disk->sectorsPerTrack = 16;
     disk->sectorSize = 256;
     disk->doubleDensity = false;
-    Serial.println("  Format: Timex FDD 3000 DS (80T/16S/256B)");
+    DBGLN("  Format: Timex FDD 3000 DS (80T/16S/256B)");
     return true;
   }
   
@@ -176,7 +176,7 @@ bool DiskManager::detectFormat(DiskImage* disk, uint32_t fileSize) {
     disk->sectorsPerTrack = 9;
     disk->sectorSize = 512;
     disk->doubleDensity = true;
-    Serial.println("  Format: 3.5\" DD (80T/9S/512B)");
+    DBGLN("  Format: 3.5\" DD (80T/9S/512B)");
     return true;
   }
   
@@ -185,7 +185,7 @@ bool DiskManager::detectFormat(DiskImage* disk, uint32_t fileSize) {
     disk->sectorsPerTrack = 9;
     disk->sectorSize = 512;
     disk->doubleDensity = true;
-    Serial.println("  Format: 5.25\" DD (40T/9S/512B)");
+    DBGLN("  Format: 5.25\" DD (40T/9S/512B)");
     return true;
   }
   
@@ -194,7 +194,7 @@ bool DiskManager::detectFormat(DiskImage* disk, uint32_t fileSize) {
     disk->sectorsPerTrack = 9;
     disk->sectorSize = 512;
     disk->doubleDensity = true;
-    Serial.println("  Format: Amstrad/Spectrum raw (40T/9S/512B)");
+    DBGLN("  Format: Amstrad/Spectrum raw (40T/9S/512B)");
     return true;
   }
   
@@ -203,14 +203,14 @@ bool DiskManager::detectFormat(DiskImage* disk, uint32_t fileSize) {
     disk->sectorsPerTrack = 9;
     disk->sectorSize = 512;
     disk->doubleDensity = true;
-    Serial.println("  Format: Extended DSK (Amstrad/Spectrum)");
+    DBGLN("  Format: Extended DSK (Amstrad/Spectrum)");
     return true;
   }
   
   // Unknown format - try to guess
-  Serial.print("  Warning: Unknown size ");
-  Serial.print(fileSize);
-  Serial.println(" bytes");
+  DBG("  Warning: Unknown size ");
+  DBG(fileSize);
+  DBGLN(" bytes");
   
   // Try Timex format first (256-byte sectors)
   uint32_t sectors256 = fileSize / 256;
@@ -219,7 +219,7 @@ bool DiskManager::detectFormat(DiskImage* disk, uint32_t fileSize) {
     disk->sectorsPerTrack = 16;
     disk->sectorSize = 256;
     disk->doubleDensity = false;
-    Serial.println("  Guessing: Timex format (40T/16S/256B)");
+    DBGLN("  Guessing: Timex format (40T/16S/256B)");
     return true;
   }
   
@@ -228,7 +228,7 @@ bool DiskManager::detectFormat(DiskImage* disk, uint32_t fileSize) {
     disk->sectorsPerTrack = 16;
     disk->sectorSize = 256;
     disk->doubleDensity = false;
-    Serial.println("  Guessing: Timex DS format (80T/16S/256B)");
+    DBGLN("  Guessing: Timex DS format (80T/16S/256B)");
     return true;
   }
   
@@ -243,11 +243,11 @@ bool DiskManager::detectFormat(DiskImage* disk, uint32_t fileSize) {
   }
   disk->sectorSize = 512;
   disk->doubleDensity = true;
-  Serial.print("  Guessing: ");
-  Serial.print(disk->tracks);
-  Serial.print("T/");
-  Serial.print(disk->sectorsPerTrack);
-  Serial.println("S/512B");
+  DBG("  Guessing: ");
+  DBG(disk->tracks);
+  DBG("T/");
+  DBG(disk->sectorsPerTrack);
+  DBGLN("S/512B");
   
   return false;  // Return false for unknown format
 }
@@ -288,7 +288,7 @@ bool DiskManager::parseExtendedDSK(uint8_t drive, const char* filename) {
   
   // Parse Track Information Block
   if (strncmp((char*)trackHeader, "Track-Info", 10) != 0) {
-    Serial.println("  Warning: Invalid Track-Info signature");
+    DBGLN("  Warning: Invalid Track-Info signature");
     return false;
   }
   
@@ -302,23 +302,23 @@ bool DiskManager::parseExtendedDSK(uint8_t drive, const char* filename) {
   disk->trackHeaderSize = 256;
   disk->doubleDensity = (disk->sectorSize >= 512);
   
-  Serial.print("  Extended DSK: ");
-  Serial.print(disk->tracks);
-  Serial.print("T/");
-  Serial.print(disk->sectorsPerTrack);
-  Serial.print("S/");
-  Serial.print(disk->sectorSize);
-  Serial.print("B, ");
-  Serial.print(sides);
-  Serial.print(" side(s)");
+  DBG("  Extended DSK: ");
+  DBG(disk->tracks);
+  DBG("T/");
+  DBG(disk->sectorsPerTrack);
+  DBG("S/");
+  DBG(disk->sectorSize);
+  DBG("B, ");
+  DBG(sides);
+  DBG(" side(s)");
   
   // Identify likely format
   if (disk->sectorSize == 256 && disk->sectorsPerTrack == 16) {
-    Serial.println(" [Timex FDD 3000]");
+    DBGLN(" [Timex FDD 3000]");
   } else if (disk->sectorSize == 512 && disk->sectorsPerTrack == 9) {
-    Serial.println(" [Amstrad CPC/Spectrum +3]");
+    DBGLN(" [Amstrad CPC/Spectrum +3]");
   } else {
-    Serial.println();
+    DBGLN();
   }
   
   return true;
@@ -331,9 +331,9 @@ void DiskManager::saveConfig() {
     delay(50);
   }
   
-  File32 configFile = sd->open(LASTIMG_FILE, O_WRITE);
+  File32 configFile = sd->open(LASTIMG_FILE, O_WRITE | O_CREAT);
   if (!configFile) {
-    Serial.println("Warning: Could not create config file");
+    DBGLN("Warning: Could not create config file");
     return;
   }
   
@@ -357,16 +357,16 @@ void DiskManager::saveConfig() {
   configFile.close();
   delay(20);
   
-  Serial.print("Saved config: Drive 0=");
-  Serial.print(loadedImageIndex[0] >= 0 ? diskImages[loadedImageIndex[0]] : "NONE");
-  Serial.print(", Drive 1=");
-  Serial.println(loadedImageIndex[1] >= 0 ? diskImages[loadedImageIndex[1]] : "NONE");
+  DBG("Saved config: Drive 0=");
+  DBG(loadedImageIndex[0] >= 0 ? diskImages[loadedImageIndex[0]] : "NONE");
+  DBG(", Drive 1=");
+  DBGLN(loadedImageIndex[1] >= 0 ? diskImages[loadedImageIndex[1]] : "NONE");
 }
 
 void DiskManager::loadConfig() {
   File32 configFile = sd->open(LASTIMG_FILE, O_READ);
   if (!configFile) {
-    Serial.println("No config file found, using defaults");
+    DBGLN("No config file found, using defaults");
     return;
   }
   
@@ -388,18 +388,18 @@ void DiskManager::loadConfig() {
     char* filename0 = line;
     char* filename1 = commaPtr + 1;
     
-    Serial.print("Loaded config: Drive 0=");
-    Serial.print(filename0);
-    Serial.print(", Drive 1=");
-    Serial.println(filename1);
+    DBG("Loaded config: Drive 0=");
+    DBG(filename0);
+    DBG(", Drive 1=");
+    DBGLN(filename1);
     
     // Find Drive 0
     if (strcmp(filename0, "NONE") != 0) {
       for (int idx = 0; idx < totalImages; idx++) {
         if (strcmp(diskImages[idx], filename0) == 0) {
           loadImage(0, idx);
-          Serial.print("  Drive 0 found at index ");
-          Serial.println(idx);
+          DBG("  Drive 0 found at index ");
+          DBGLN(idx);
           break;
         }
       }
@@ -410,8 +410,8 @@ void DiskManager::loadConfig() {
       for (int idx = 0; idx < totalImages; idx++) {
         if (strcmp(diskImages[idx], filename1) == 0) {
           loadImage(1, idx);
-          Serial.print("  Drive 1 found at index ");
-          Serial.println(idx);
+          DBG("  Drive 1 found at index ");
+          DBGLN(idx);
           break;
         }
       }
