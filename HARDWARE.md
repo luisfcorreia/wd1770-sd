@@ -36,7 +36,7 @@ Complete hardware specifications, pinout, wiring guide, and technical details fo
 **NOT SSD1306!** Most "128x64 I2C OLED" displays sold are actually SH1106.
 
 **Specifications:**
-- Resolution: 128×64 pixels
+- Resolution: 128x64 pixels
 - Interface: I2C (software bit-bang on any GPIO)
 - I2C Address: Usually 0x3C (sometimes 0x3D)
 - Power: 3.3V only (5V will destroy it!)
@@ -51,11 +51,11 @@ Complete hardware specifications, pinout, wiring guide, and technical details fo
 - Logic level: 3.3V
 - Power: 3.3V, ~100mA peak during writes
 
-### Rotary Encoder
-- Type: Standard mechanical rotary encoder with push button
-- Pins: CLK (A), DT (B), SW (button), GND, +3.3V
-- Detents: Any (20-30 typical)
-- Built-in pull-ups: Optional (code uses internal STM32 pull-ups)
+### Push Buttons
+- Type: Momentary push buttons, normally open
+- Count: 3 (UP, DOWN, SELECT)
+- Logic: Active low (internal STM32 pull-ups used)
+- Connections: One terminal to GPIO pin, other terminal to GND
 
 ---
 
@@ -77,8 +77,8 @@ Complete hardware specifications, pinout, wiring guide, and technical details fo
 | **Control Signals** | | |
 | A0 | PA8 | Register select bit 0 |
 | A1 | PA9 | Register select bit 1 |
-| CS̅ | PA10 | Chip select (active low) |
-| R/W̅ | PB15 | Read/Write (HIGH=read, LOW=write) |
+| CS | PA10 | Chip select (active low) |
+| R/W | PB15 | Read/Write (HIGH=read, LOW=write) |
 | INTRQ | PA15 | Interrupt request output |
 | DRQ | PB8 | Data request output |
 | DDEN | PB9 | Density select input |
@@ -93,9 +93,9 @@ Complete hardware specifications, pinout, wiring guide, and technical details fo
 | SDA | PB14 | I2C data (software) |
 | SCL | PA3 | I2C clock (software) |
 | **User Interface** | | |
-| Encoder CLK | PA0 | Rotary encoder A |
-| Encoder DT | PA1 | Rotary encoder B |
-| Encoder SW | PA2 | Rotary encoder button |
+| BTN_UP | PA0 | Up button (active low) |
+| BTN_DOWN | PA1 | Down button (active low) |
+| BTN_SELECT | PA2 | Select button (active low) |
 | LED | PC13 | On-board LED |
 | **Reserved/Avoid** | | |
 | USB D- | PA11 | USB (do not use as GPIO) |
@@ -106,7 +106,7 @@ Complete hardware specifications, pinout, wiring guide, and technical details fo
 | LSE_OUT | PC15 | Oscillator (causes crashes) |
 
 ### Free Pins
-- **PB10** - Available for future use (previously incorrectly assigned)
+- **PB10** - Available for future use
 - **PB11** - NOT exposed on Black Pill PCB
 
 ---
@@ -117,70 +117,71 @@ Complete hardware specifications, pinout, wiring guide, and technical details fo
 
 #### Power Distribution
 ```
-Black Pill 3V3 pin → Breadboard 3.3V rail
-Black Pill GND pin → Breadboard GND rail
+Black Pill 3V3 pin -> Breadboard 3.3V rail
+Black Pill GND pin -> Breadboard GND rail
 ```
 
 **CRITICAL:** All components MUST use 3.3V:
 - OLED: 3.3V (5V will destroy it)
 - SD card module: 3.3V
-- Rotary encoder: 3.3V
+- Buttons: 3.3V (or GND only - use internal pull-ups)
 
 #### OLED Display
 ```
-OLED VCC  → 3.3V
-OLED GND  → GND
-OLED SDA  → PB14
-OLED SCL  → PA3
+OLED VCC  -> 3.3V
+OLED GND  -> GND
+OLED SDA  -> PB14
+OLED SCL  -> PA3
 ```
 
-**Optional pull-ups:** 4.7kΩ resistors from SDA and SCL to 3.3V improve signal integrity for long wires.
+**Optional pull-ups:** 4.7kOhm resistors from SDA and SCL to 3.3V improve signal integrity for long wires.
 
 #### SD Card Module
 ```
-SD VCC   → 3.3V
-SD GND   → GND
-SD CS    → PA4
-SD SCK   → PA5
-SD MISO  → PA6
-SD MOSI  → PA7
+SD VCC   -> 3.3V
+SD GND   -> GND
+SD CS    -> PA4
+SD SCK   -> PA5
+SD MISO  -> PA6
+SD MOSI  -> PA7
 ```
 
-**Capacitor recommended:** 10µF across VCC/GND near SD card module for stable power.
+**Capacitor recommended:** 10uF across VCC/GND near SD card module for stable power.
 
-#### Rotary Encoder
+#### Push Buttons
 ```
-Encoder +   → 3.3V
-Encoder GND → GND
-Encoder CLK → PA0
-Encoder DT  → PA1
-Encoder SW  → PA2
+BTN_UP one terminal     -> PA0
+BTN_DOWN one terminal   -> PA1
+BTN_SELECT one terminal -> PA2
+All other terminals     -> GND
 ```
 
-**Optional:** 100nF ceramic capacitors from each signal pin to GND for hardware debouncing (code already does software debouncing).
+Internal pull-ups are enabled in firmware; no external resistors needed.
+
+**Optional:** 100nF ceramic capacitors from each signal pin to GND for hardware debouncing (firmware already does software debouncing).
 
 #### WD1770 Bus Interface (For Real Hardware Connection)
 
-**Pull-up resistors required (10kΩ to 3.3V):**
+**Pull-up resistors required (10kOhm to 3.3V):**
 ```
-A0    → PA8   (with 10kΩ pull-up)
-A1    → PA9   (with 10kΩ pull-up)
-CS̅    → PA10  (with 10kΩ pull-up)
-R/W̅   → PB15  (with 10kΩ pull-up)
-DDEN  → PB9   (with 10kΩ pull-up)
-DS0   → PB12  (with 10kΩ pull-up)
-DS1   → PB13  (with 10kΩ pull-up)
+A0    -> PA8   (with 10kOhm pull-up)
+A1    -> PA9   (with 10kOhm pull-up)
+CS    -> PA10  (with 10kOhm pull-up)
+R/W   -> PB15  (with 10kOhm pull-up)
+DDEN  -> PB9   (with 10kOhm pull-up)
+DS0   -> PB12  (with 10kOhm pull-up)
+DS1   -> PB13  (with 10kOhm pull-up)
 ```
 
 **Data bus (bidirectional):**
 ```
-D0-D7 → PB0-PB7 (no pull-ups, driven by either CPU or emulator)
+D0-D7 -> PB0-PB7 (no pull-ups, driven by either CPU or emulator)
 ```
 
 **Output signals (no pull-ups needed):**
 ```
-INTRQ → PA15 (driven by emulator)
-DRQ   → PB8  (driven by emulator)
+INTRQ -> PA15 (driven by emulator)
+DRQ   -> PB8  (driven by emulator)
 ```
 
 ### Level Shifting (If Needed)
@@ -208,7 +209,7 @@ Recommended: TXB0108 (8-bit bidirectional)
 - 25MHz crystal (not 8MHz)
 - USB-C connector (newer) or micro-USB (older)
 
-**Incompatible:** 
+**Incompatible:**
 - STM32F401 variants (less RAM/flash)
 - Generic F411 with wrong crystal frequency
 - STM32F103 "Blue Pill" (completely different MCU)
@@ -219,10 +220,8 @@ Recommended: TXB0108 (8-bit bidirectional)
 ```
 Physical check:
 - Usually has "0.96 inch" marking
-- 128×64 resolution
+- 128x64 resolution
 - 4-pin I2C interface (VCC, GND, SCL, SDA)
-
-Test: Use oled-test-u8g2.ino to verify
 ```
 
 **Incorrect:** SSD1306 will initialize but show garbage or wrong offset
@@ -256,7 +255,7 @@ Test: Use oled-test-u8g2.ino to verify
 | STM32F411 | 15mA | 40mA | 80mA |
 | OLED Display | 10mA | 20mA | 25mA |
 | SD Card | 5mA | 40mA | 100mA |
-| Rotary Encoder | <1mA | <1mA | <1mA |
+| Buttons | <1mA | <1mA | <1mA |
 | **Total** | **30mA** | **100mA** | **200mA** |
 
 ### Power Sources
@@ -272,9 +271,9 @@ Test: Use oled-test-u8g2.ino to verify
 - Bypass Black Pill regulator
 
 **Battery Power:**
-- 3.7V LiPo → 3.3V regulator (LM1117-3.3 or better)
+- 3.7V LiPo -> 3.3V regulator (LM1117-3.3 or better)
 - Need >300mA regulator for safety margin
-- Add 100µF capacitor on output
+- Add 100uF capacitor on output
 
 ---
 
@@ -287,15 +286,15 @@ Based on real WD1770 datasheet:
 **Setup times:**
 - Address setup: 50ns min
 - Data setup (write): 100ns min
-- CS̅ to R/W̅: 0ns min
+- CS to R/W: 0ns min
 
 **Hold times:**
 - Address hold: 10ns min
 - Data hold (write): 10ns min
 
 **Pulse widths:**
-- CS̅ low: 500ns min
-- R/W̅ stable during CS̅: Required
+- CS low: 500ns min
+- R/W stable during CS: Required
 
 **STM32F411 @ 100MHz:**
 - Clock period: 10ns
@@ -335,22 +334,22 @@ Based on real WD1770 datasheet:
 
 **Component placement:**
 ```
-[SD Card]────[Black Pill]────[OLED]
-                  │
-            [Rotary Encoder]
-                  │
+[SD Card]----[Black Pill]----[OLED]
+                  |
+            [Buttons x3]
+                  |
          [FDC Bus Connector]
 ```
 
 **Trace widths:**
 - Power (3.3V, GND): 20 mil minimum
 - Signals: 10 mil
-- Data bus: Match length ±5mm
+- Data bus: Match length +/-5mm
 
 **Keep short (< 50mm):**
 - SPI traces to SD card
 - I2C traces to OLED
-- Encoder traces
+- Button traces
 
 **Can be longer:**
 - FDC bus signals (have pull-ups)
@@ -358,9 +357,9 @@ Based on real WD1770 datasheet:
 
 ### Connector Suggestions
 
-**FDC Bus:** 
-- 2×17 pin header (34-pin floppy connector compatible)
-- Or: 2×20 IDC for all signals + power
+**FDC Bus:**
+- 2x17 pin header (34-pin floppy connector compatible)
+- Or: 2x20 IDC for all signals + power
 
 **Power:**
 - Barrel jack (5V input) or
@@ -371,7 +370,7 @@ Based on real WD1770 datasheet:
 
 **No heat management needed:**
 - All components run cool
-- STM32 ~40°C typical
+- STM32 ~40C typical
 - No heatsinks required
 
 ---
@@ -383,16 +382,16 @@ Based on real WD1770 datasheet:
 Before connecting to real hardware, validate:
 
 1. **Power test:** 3.3V stable, <100mV ripple
-2. **OLED test:** Run oled-test-u8g2.ino
-3. **SD card test:** Run sd-card-test.ino
-4. **Encoder test:** Verify rotation and button
-5. **USB serial:** Verify output appears
+2. **OLED test:** Verify display shows drive info on boot
+3. **SD card test:** Verify disk images listed in serial output
+4. **Button test:** Verify UP/DOWN/SELECT navigate the menu
+5. **USB serial:** Verify output appears at 115200 baud
 
 ### With Real Hardware
 
-1. **Set TEST_MODE = 0** in code
+1. **Set TEST_MODE = 0** in wd1770.ino
 2. **Verify voltage levels:** 3.3V logic or add level shifters
-3. **Check pull-ups:** 10kΩ on all input control signals
+3. **Check pull-ups:** 10kOhm on all input control signals
 4. **Monitor with oscilloscope:** Check data bus activity
 5. **Start with read-only:** Test sector reads before writes
 
@@ -400,7 +399,7 @@ Before connecting to real hardware, validate:
 
 **Essential:**
 - Multimeter (voltage check)
-- USB serial monitor (Arduino IDE)
+- USB serial monitor (Arduino IDE, 115200 baud)
 
 **Highly recommended:**
 - Logic analyzer (check SPI, I2C, bus timing)
@@ -431,7 +430,7 @@ Before connecting to real hardware, validate:
 **Symptom:** Not detected
 - Check format: Must be FAT32
 - Check card type: Use Class 4-10, avoid UHS-II
-- Check power: Needs stable 3.3V, add 10µF capacitor
+- Check power: Needs stable 3.3V, add 10uF capacitor
 - Try different card: Some cards are incompatible
 
 **Symptom:** Random failures
@@ -439,20 +438,20 @@ Before connecting to real hardware, validate:
 - SPI wiring too long (keep <100mm)
 - Card worn out (try new card)
 
-### Encoder Issues
+### Button Issues
 
-**Symptom:** No response
-- Check TEST_MODE: Must not exit loop early
-- Check wiring: CLK=PA0, DT=PA1, SW=PA2
-- Check mechanical: Encoder may be damaged
-- Add hardware debouncing (100nF capacitors)
+**Symptom:** No response to button presses
+- Check wiring: BTN_UP=PA0, BTN_DOWN=PA1, BTN_SELECT=PA2
+- Verify button connects GPIO pin to GND when pressed
+- Check for display screensaver: any button press should wake it first
+- Add hardware debouncing (100nF capacitors from pin to GND)
 
 ### Bus Interface Issues
 
 **Symptom:** Target system doesn't boot
 - Voltage mismatch (need level shifters for 5V system)
-- Missing pull-ups (10kΩ required)
-- Incorrect R/W̅ polarity
+- Missing pull-ups (10kOhm required)
+- Incorrect R/W polarity
 - Data bus conflict (check tri-state logic)
 
 ---
@@ -464,15 +463,15 @@ Before connecting to real hardware, validate:
 | STM32F411 Black Pill | 1 | WeAct Studio recommended | $5 |
 | SH1106 128x64 OLED | 1 | I2C, 0.96", verify SH1106 | $3 |
 | SD card module | 1 | SPI interface, 3.3V | $1 |
-| Rotary encoder | 1 | With push button | $1 |
+| Push buttons | 3 | Momentary, normally open | $0.30 |
 | microSD card | 1 | 1-32GB, FAT32, Class 4-10 | $5 |
-| 10kΩ resistors | 10 | Pull-ups for FDC bus | $0.50 |
-| 4.7kΩ resistors | 2 | Optional I2C pull-ups | $0.10 |
-| 100nF capacitors | 3 | Optional encoder debounce | $0.30 |
-| 10µF capacitor | 1 | SD card power stability | $0.10 |
+| 10kOhm resistors | 10 | Pull-ups for FDC bus | $0.50 |
+| 4.7kOhm resistors | 2 | Optional I2C pull-ups | $0.10 |
+| 100nF capacitors | 3 | Optional button debounce | $0.30 |
+| 10uF capacitor | 1 | SD card power stability | $0.10 |
 | Breadboard | 1 | For prototyping | $3 |
 | Jumper wires | 40 | M-M and M-F mix | $2 |
-| **Total** | | | **~$21** |
+| **Total** | | | **~$20** |
 
 **For PCB version, add:**
 - PCB fabrication (5 pcs): $5
@@ -487,17 +486,17 @@ Before connecting to real hardware, validate:
 
 **Key connections:**
 ```
-VCC (3.3V) ────┬──> Black Pill 3V3
-               ├──> OLED VCC
-               ├──> SD module VCC
-               └──> Encoder +
+VCC (3.3V) ----+---> Black Pill 3V3
+               +---> OLED VCC
+               +---> SD module VCC
+               +---> (not needed for buttons - use GND only)
 
-GND ───────────┬──> Black Pill GND
-               ├──> OLED GND
-               ├──> SD module GND
-               └──> Encoder GND
+GND -----------+---> Black Pill GND
+               +---> OLED GND
+               +---> SD module GND
+               +---> All button second terminals
 
-Pull-ups (10kΩ each to 3.3V):
+Pull-ups (10kOhm each to 3.3V):
    PA8, PA9, PA10, PB15, PB9, PB12, PB13
 ```
 
@@ -505,13 +504,13 @@ Pull-ups (10kΩ each to 3.3V):
 
 ## Mechanical Specifications
 
-**PCB Size (recommended):** 80mm × 60mm
+**PCB Size (recommended):** 80mm x 60mm
 - Fits common project boxes
 - Room for all components
 - Can mount inside Timex FDD 3000 case
 
 **Mounting holes:** M3 (3mm) in corners
-**Height:** ~15mm with OLED and encoder
+**Height:** ~15mm with OLED and buttons
 
 ---
 

@@ -23,7 +23,7 @@ This is a WD1770/WD1772 Floppy Disk Controller replacement that uses an STM32F41
 - NO physical floppy interface pins (STEP, DIRC, TR00, INDEX, MOTOR, etc.)
 - NO hardware drive select pins (DS0/DS1) - drive switching via UI only
 - Dual virtual drives (A: and B:) managed in software
-- All drive selection done via rotary encoder UI
+- All drive selection done via 3-button UI (BTN_UP, BTN_DOWN, BTN_SELECT)
 
 ### Pin Assignments (FIXED - DO NOT CHANGE)
 **Data Bus:** PB0-PB7 (8 pins)
@@ -31,7 +31,7 @@ This is a WD1770/WD1772 Floppy Disk Controller replacement that uses an STM32F41
 **FDC Control:** PA15 (INTRQ), PB8 (DRQ), PB9 (DDEN)
 **SD Card SPI:** PA4 (CS), PA5 (SCK), PA6 (MISO), PA7 (MOSI)
 **OLED I2C:** PA3 (SCL), PB14 (SDA)
-**UI:** PC13 (LED), PA0-PA2 (Rotary encoder)
+**UI:** PC13 (LED), PA0 (BTN_UP), PA1 (BTN_DOWN), PA2 (BTN_SELECT)
 
 **Reserved/Avoid**
  USB D-  PA11  USB (do not use as GPIO)
@@ -52,9 +52,15 @@ This is a WD1770/WD1772 Floppy Disk Controller replacement that uses an STM32F41
 ### Current Status
 - Code compiles successfully
 - Dual drive support implemented
-- OLED UI implemented
-- Rotary encoder working
-- NOT yet tested on real hardware
+- OLED UI implemented with 3-button navigation
+- OLED screensaver: blanks after 30s idle, any button wakes
+- DEBUG_SERIAL define in Hardware.h controls all serial output
+- Hardware tested and working (UI, SD card, OLED)
+- FDC bus interface: ready for testing with real hardware
+
+### Active Sketch
+The active firmware is `wd1770/wd1770.ino` (modular, multi-file).
+`wd1770-emu/wd1770-emu.ino` is a legacy monolithic sketch kept for reference only.
 
 ## When Starting New Conversation
 1. Always check out a fresh new copy from the repo
@@ -117,15 +123,15 @@ The test: Every changed line should trace directly to the user's request.
 **Define success criteria. Loop until verified.**
 
 Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
+- "Add validation" -> "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" -> "Write a test that reproduces it, then make it pass"
+- "Refactor X" -> "Ensure tests pass before and after"
 
 For multi-step tasks, state a brief plan:
 ```
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
+1. [Step] -> verify: [check]
+2. [Step] -> verify: [check]
+3. [Step] -> verify: [check]
 ```
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
@@ -133,5 +139,3 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
-
-

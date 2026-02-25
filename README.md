@@ -1,6 +1,6 @@
 # WD1770-SD Floppy Disk Controller Emulator
 
-SD card-based drop-in replacement for WD1770/1772 floppy disk controller chips, with rotary encoder UI and OLED display.
+SD card-based drop-in replacement for WD1770/1772 floppy disk controller chips, with 3-button UI and OLED display.
 
 ## Status: Hardware Tested & Working
 
@@ -8,7 +8,7 @@ SD card-based drop-in replacement for WD1770/1772 floppy disk controller chips, 
 - [WORKING] SWD programming
 - [WORKING] OLED display (SH1106 driver)
 - [WORKING] SD card (FAT32, multiple disk formats)
-- [WORKING] Rotary encoder UI with image selection
+- [WORKING] 3-button UI with image selection
 - [WORKING] Config file persistence (filename-based)
 - [TESTING] FDC bus interface (ready for testing with real hardware)
 
@@ -25,8 +25,8 @@ SD card-based drop-in replacement for WD1770/1772 floppy disk controller chips, 
 - **STM32F411 "Black Pill"** development board
 - **Micro SD card module** (SPI interface)
 - **SH1106 128x64 OLED display** (I2C)
-- **Rotary encoder** with push button
-- Micro SD card (FAT32 formatted, ≤32GB recommended)
+- **3x push buttons** (UP, DOWN, SELECT)
+- Micro SD card (FAT32 formatted, <=32GB recommended)
 - Breadboard and jumper wires for prototyping
 
 ### Pin Connections
@@ -34,10 +34,10 @@ See [PIN_ASSIGNMENTS.md](PIN_ASSIGNMENTS.md) for complete wiring details.
 
 **Critical pins:**
 - Data bus: PB0-PB7 (must be consecutive for parallel I/O)
-- R/W̅: PB15 (single pin - HIGH=read, LOW=write)
+- R/W: PB15 (single pin - HIGH=read, LOW=write)
 - OLED: PB14 (SDA), PA3 (SCL) - software I2C
 - SD card: PA4-PA7 (SPI1)
-- Rotary: PA0 (CLK), PA1 (DT), PA2 (SW)
+- Buttons: PA0 (UP), PA1 (DOWN), PA2 (SELECT)
 
 **Avoid these pins:**
 - PA11/PA12: USB D-/D+ (breaks serial)
@@ -49,17 +49,18 @@ See [PIN_ASSIGNMENTS.md](PIN_ASSIGNMENTS.md) for complete wiring details.
 ### Arduino IDE Configuration
 
 1. **Install STM32 board support:**
-   - Tools → Board Manager → Search "STM32"
+   - Tools -> Board Manager -> Search "STM32"
    - Install "STM32 MCU based boards" by STMicroelectronics
 
 2. **Board settings:**
-   - Board: "Generic STM32F4 series" → "BlackPill F411CE"
+   - Board: "Generic STM32F4 series" -> "BlackPill F411CE"
    - USB support: "CDC (generic Serial supersede U(S)ART)"
    - Upload method: "STM32CubeProgrammer (SWD)" or your programmer
 
-3. **Install U8g2 library:**
-   - Sketch → Include Library → Manage Libraries
-   - Search "U8g2" → Install "U8g2 by oliver"
+3. **Install libraries:**
+   - Sketch -> Include Library -> Manage Libraries
+   - Search "U8g2" -> Install "U8g2 by oliver"
+   - Search "SdFat" -> Install "SdFat by Bill Greiman"
 
 ### Upload Process
 
@@ -85,32 +86,40 @@ See [PIN_ASSIGNMENTS.md](PIN_ASSIGNMENTS.md) for complete wiring details.
 
 ### 2. Test Mode (No FDC Connected)
 ```cpp
-// In wd1770-emu-u8g2.ino, line 31:
-#define TEST_MODE  1  // Simulates FDC signals
+// In wd1770/wd1770.ino:
+int TEST_MODE = 1;  // Set to 0 when connecting to real hardware
 ```
 This allows testing UI and disk images without connecting to actual hardware.
 
-### 3. Upload Code
+### 3. Debug Serial Output
+```cpp
+// In wd1770/Hardware.h:
+#define DEBUG_SERIAL 1  // Set to 0 to suppress all serial output
 ```
-1. Open wd1770-emu-u8g2.ino
+
+### 4. Upload Code
+```
+1. Open wd1770/wd1770.ino
 2. Verify board settings
 3. Upload
 4. Open Serial Monitor (115200 baud)
 ```
 
-### 4. Using the UI
+### 5. Using the UI
 
 **Normal mode:**
 - Display shows current Drive A and Drive B images
-- Press encoder button → Enter image selection menu
+- Display blanks after 30 seconds of inactivity (OLED screensaver)
+- Any button press wakes the display
 
 **Image selection:**
-- Rotate encoder → Browse disk images
-- Press → Select for Drive A
-- Rotate → Browse for Drive B (includes "NONE" option)
-- Press → Confirm
-- Rotate → Toggle YES/NO
-- Press → Load images and return to normal mode
+- Press SELECT -> Enter Drive A selection
+- UP/DOWN -> Browse disk images
+- Press SELECT -> Confirm Drive A, move to Drive B selection
+- UP/DOWN -> Browse for Drive B (includes "NONE" option)
+- Press SELECT -> Move to confirm screen
+- UP/DOWN -> Toggle YES/NO
+- Press SELECT -> Load images and return to normal mode
 
 ## Disk Image Support
 
@@ -139,11 +148,10 @@ Images are saved to `/lastimg.cfg` on SD card:
 ## Serial Monitor Output
 
 ```
-WD1770 SD Card Emulator - IMPROVED
-Based on FlashFloppy concept
-OLED display initialized
+WD1770 SD Card Emulator
+Modular Architecture
 Initializing SD card...
-SD Card initialized
+SD Card initialized (LFN support enabled)
 Found: CPM.DSK
 Found: TOS.DSK
 Found: GAME.DSK
@@ -156,21 +164,22 @@ Drive 0: Loaded CPM.DSK (174080 bytes, 40T/16S/256B)
 Drive 1: Loaded TOS.DSK (174336 bytes, 40T/16S/256B)
   Format: Extended DSK (Timex FDD 3000)
 Ready!
+Safe to reset/power off anytime EXCEPT during 'Saving config...' message
 ```
 
 ## Connecting to Real Hardware
 
-1. **Set TEST_MODE to 0** in code
+1. **Set TEST_MODE to 0** in wd1770.ino
 2. **Wire FDC bus signals** per PIN_ASSIGNMENTS.md
-3. **Add pull-up resistors** (10kΩ) on control signals:
-   - A0, A1, CS, R/W̅, DDEN, DS0, DS1
+3. **Add pull-up resistors** (10kOhm) on control signals:
+   - A0, A1, CS, R/W, DDEN, DS0, DS1
 4. **Power considerations:**
    - All signals are 3.3V logic
    - Target system must be 3.3V compatible or use level shifters
 
 ### Bus Protocol
-- **CS̅ (active low):** Chip select
-- **R/W̅:** HIGH = CPU reading, LOW = CPU writing
+- **CS (active low):** Chip select
+- **R/W:** HIGH = CPU reading, LOW = CPU writing
 - **A0, A1:** Register select (00=Status/Cmd, 01=Track, 10=Sector, 11=Data)
 - **D0-D7:** Bidirectional data bus
 - **INTRQ:** Interrupt request output (active high)
@@ -182,37 +191,48 @@ Ready!
 - Verify SH1106 chip (not SSD1306)
 - Check pins: SDA=PB14, SCL=PA3
 - Verify 3.3V power (NOT 5V!)
-- Try running oled-test-u8g2.ino
+- Check DEBUG_SERIAL output for "Warning: OLED initialization failed"
 
 ### SD Card Not Detected
 - Check FAT32 format (not exFAT)
 - Verify wiring: CS=PA4, SCK=PA5, MISO=PA6, MOSI=PA7
 - Try different SD card (older/slower cards often more reliable)
-- Run sd-card-test.ino for diagnostics
 
 ### Serial Port Not Appearing
 - Verify "USB support: CDC" in Arduino IDE
 - Check USB cable (must be data-capable, not charge-only)
 - On Linux: Check `dmesg` for USB enumeration errors
 
+### No Serial Output
+- Verify `DEBUG_SERIAL 1` in Hardware.h
+
 ### Compile Errors
-- "PIN_A0 redefined" → Old code, update to WD_A0/WD_A1
-- U8g2 errors → Install U8g2 library
-- STM32 errors → Update STM32 board package to latest
+- "PIN_A0 redefined" -> Old code, update to WD_A0/WD_A1
+- U8g2 errors -> Install U8g2 library
+- SdFat errors -> Install SdFat library
+- STM32 errors -> Update STM32 board package to latest
 
 ## Project Structure
 
 ```
-wd1770-emu-u8g2.ino      - Main firmware
-PIN_ASSIGNMENTS.md        - Complete pinout reference
-SD_CARD_DEBUG.md          - SD card troubleshooting guide
-UI_FLOW.md               - User interface state machine
+wd1770/
+├── wd1770.ino          - Main firmware (open this in Arduino IDE)
+├── Hardware.h          - Pin definitions and DEBUG_SERIAL control
+├── Hardware.cpp        - Pin variable definitions
+├── DiskImage.h         - Disk image data structures
+├── DiskManager.h/.cpp  - SD card file operations and format detection
+├── FdcDevice.h/.cpp    - WD1770 bus emulation logic
+└── OledUI.h/.cpp       - OLED display and button UI
 
-Test sketches:
-├── sd-card-test.ino        - SD card diagnostics
-├── sd-oled-test.ino        - Combined SD+OLED test
-├── oled-test-u8g2.ino      - OLED driver test (SH1106)
-└── wd1770-diagnostic.ino   - Hardware diagnostic with blink codes
+wd1770-emu/
+└── wd1770-emu.ino      - Legacy monolithic sketch (reference only)
+
+documentation/
+├── timex-fdd.md        - Timex FDD 3000 technical reference
+└── timex-interface.md  - Timex bus interface details
+
+PIN_ASSIGNMENTS.md      - Complete pinout reference
+HARDWARE.md             - Hardware documentation and BOM
 ```
 
 ## Technical Details

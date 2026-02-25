@@ -65,12 +65,12 @@ GND = GND
 
 ### User Interface
 ```
-LED = PC13  (On-board LED)
+LED    = PC13  (On-board LED)
 
-Rotary Encoder:
-  CLK = PA0  (Encoder output A)
-  DT  = PA1  (Encoder output B)
-  SW  = PA2  (Push button, active low)
+Buttons (active low, internal pull-up):
+  BTN_UP     = PA0  (Navigate up)
+  BTN_DOWN   = PA1  (Navigate down)
+  BTN_SELECT = PA2  (Confirm / enter menu)
 ```
 
 ---
@@ -107,14 +107,14 @@ PB11 = Not available on Black Pill PCB
 ## Free Pins Available for Expansion
 
 ```
-PB10 - Available (previously incorrectly assigned)
+PB10 - Available
 ```
 
 ---
 
 ## Pull-up Resistors Required
 
-**For FDC bus interface (10kΩ to 3.3V):**
+**For FDC bus interface (10kOhm to 3.3V):**
 ```
 WD_A0   (PA8)
 WD_A1   (PA9)
@@ -125,7 +125,7 @@ WD_DS0  (PB12)
 WD_DS1  (PB13)
 ```
 
-**Optional for I2C (4.7kΩ to 3.3V):**
+**Optional for I2C (4.7kOhm to 3.3V):**
 ```
 OLED_SDA (PB14)
 OLED_SCL (PA3)
@@ -172,7 +172,8 @@ Real WD1770 chip pin 2 is R/W (not separate RE/WE):
 **All pins operate at 3.3V logic levels.**
 
 If connecting to 5V systems:
-- do nothing, STM32 is 5V tolerant
+- STM32 GPIO pins are 5V tolerant; level shifters not required for inputs
+- Outputs driven at 3.3V; verify target system accepts this level
 
 ---
 
@@ -190,7 +191,7 @@ Before powering on:
 
 ## TEST_MODE Configuration
 
-When `TEST_MODE = 1` in code:
+When `TEST_MODE = 1` in wd1770.ino:
 - DDEN configured as INPUT_PULLDOWN (reads LOW = FDC enabled)
 - DS0 configured as INPUT_PULLUP (reads HIGH = drive 0 selected)
 - DS1 configured as INPUT_PULLDOWN (reads LOW = drive 1 not selected)
@@ -217,9 +218,9 @@ To avoid Arduino framework conflicts:
 
 | Pin | Function | Direction | Pull-up | Notes |
 |-----|----------|-----------|---------|-------|
-| PA0 | ROTARY_CLK | Input | Internal | Encoder A |
-| PA1 | ROTARY_DT | Input | Internal | Encoder B |
-| PA2 | ROTARY_SW | Input | Internal | Button |
+| PA0 | BTN_UP | Input | Internal | Button, active low |
+| PA1 | BTN_DOWN | Input | Internal | Button, active low |
+| PA2 | BTN_SELECT | Input | Internal | Button, active low |
 | PA3 | OLED_SCL | Output | Optional | Software I2C |
 | PA4 | SD_CS | Output | - | SPI |
 | PA5 | SD_SCK | Output | - | SPI |
@@ -248,4 +249,4 @@ To avoid Arduino framework conflicts:
 
 ---
 
-**Last Updated:** February 2026 - Matches wd1770-emu-u8g2.ino v1.0
+**Last Updated:** February 2026 - Matches wd1770/wd1770.ino
