@@ -1,0 +1,25 @@
+# --- Tooling / session ---
+.cache/
+.config/
+.local/
+.npm/
+
+# --- Vendored deps (embedded git repos, not ours) ---
+rp2350b/pico-sdk/
+rp2350b/pico-fatfs-sd/
+rp2350b/u8g2/
+
+# --- Build artifacts (rp2350b) ---
+rp2350b/build/
+*.uf2
+*.elf
+*.bin
+*.o
+*.obj
+
+# --- Editor / OS ---
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
