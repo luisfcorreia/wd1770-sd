@@ -1,0 +1,18 @@
+;
+; wd1770-sd RP2350B - PIO Program for 8-bit Parallel Bus
+;
+; Read program: Captures 8-bit data from the WD1770 bus
+; when CS goes low and RW is high (read from target's perspective).
+;
+
+.program data_bus_read
+; Wait for CS (GP11, active low) to go low,
+; then read 8 data bits from GP1-GP8.
+;
+; IN base must be set to GP1 (WD_DATA_BASE) so that
+; "in pins, 8" reads from the 8-bit data bus.
+.wrap_target
+    wait 0 gpio 11         ; Wait for CS low (absolute GPIO 11 = WD_CS_PIN)
+    nop [1]                ; Small settle time
+    in pins, 8             ; Read 8 data bits from GP1-GP8
+.wrap
